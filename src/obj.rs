@@ -9,12 +9,12 @@ use std::{
 #[derive(Debug)]
 pub struct Obj {
     pub vertices: Vec<[f32; 3]>,
-    pub faces: Vec<[u32; 3]>,
+    pub faces: Vec<[usize; 3]>,
 }
 
 impl Obj {
     #[inline(always)]
-    fn parse_index(word: &str) -> u32 {
+    fn parse_index(word: &str) -> usize {
         word.split('/').nth(0).unwrap().parse().unwrap()
     }
 
