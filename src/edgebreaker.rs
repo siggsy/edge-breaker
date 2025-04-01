@@ -158,24 +158,26 @@ impl EdgeBreaker {
             }
         }
 
-        let Some(&gate) = n.iter().find(|&x| *x != null) else {
-            // TODO handle sphere-like shapes
-            panic!("Surface does not have a border");
+        let gate = match n.iter().find(|&x| *x != null) {
+            Some(&gate) => gate,
+            None => Id(1),
         };
 
         // Find boundary
         let mut g = gate;
-        let ev = e[g];
-        boundary.push(ev);
-        vm[ev] = true;
-        hm[g] = true;
-        g = n[g];
-        while g != gate {
+        while g != null && e[g] != s[gate] {
             let ev = e[g];
             boundary.push(ev);
             vm[ev] = true;
             hm[g] = true;
             g = n[g];
+        }
+        boundary.push(s[gate]);
+        vm[s[gate]] = true;
+
+        if n[gate] == null {
+            n[gate] = o[gate];
+            p[gate] = o[gate];
         }
 
         Self {
