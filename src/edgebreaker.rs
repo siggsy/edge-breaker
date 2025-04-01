@@ -1,7 +1,11 @@
+#![allow(non_snake_case)]
+
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::ops::{Index, IndexMut};
 use std::fmt::Debug;
+
+use log::{debug, info};
 
 use crate::obj::Obj;
 
@@ -57,6 +61,7 @@ impl Hash for Edge {
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 struct Id(usize);
+const NULL: Id = Id(0);
 
 impl Debug for Id {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -84,10 +89,14 @@ impl<T> IndexMut<Id> for Vec<T> {
 impl EdgeBreaker {
     pub fn compress(obj: &Obj) -> Self {
         let mut eb = Self::init(obj);
-        println!("Before:\n{:?}", eb);
+        debug!("faces.len: {:?}", obj.faces.len());
+        debug!("vertices.len: {:?}", obj.vertices.len());
         eb.run();
-        println!("After:\n{:?}", eb);
-
+        debug!("gate: {:?}", eb.gate);
+        debug!("gate.s: {:?}", eb.s[eb.gate]);
+        debug!("gate.e: {:?}", eb.e[eb.gate]);
+        debug!("history: {:?}", eb.history);
+        debug!("history.len: {:?}", eb.history.len());
         eb
     }
 
@@ -96,13 +105,12 @@ impl EdgeBreaker {
     }
 
     fn init(obj: &Obj) -> Self {
-        let capacity = obj.faces.len() * 3; // 0 == null
-        let null = Id(0);
-        let mut s: Vec<Id> = vec![null; capacity];
-        let mut e: Vec<Id> = vec![null; capacity];
-        let mut n: Vec<Id> = vec![null; capacity];
-        let mut p: Vec<Id> = vec![null; capacity];
-        let mut o: Vec<Id> = vec![null; capacity];
+        let capacity = obj.faces.len() * 3;
+        let mut s: Vec<Id> = vec![NULL; capacity];
+        let mut e: Vec<Id> = vec![NULL; capacity];
+        let mut n: Vec<Id> = vec![NULL; capacity];
+        let mut p: Vec<Id> = vec![NULL; capacity];
+        let mut o: Vec<Id> = vec![NULL; capacity];
         let mut vm: Vec<bool> = vec![false; obj.vertices.len()];
         let mut hm: Vec<bool> = vec![false; capacity];
         let mut boundary: Vec<Id> = Vec::new();
@@ -129,43 +137,43 @@ impl EdgeBreaker {
                     b: face[(i + 1) % 3],
                 };
 
-                if let Some(_h) = edge_map.insert(edge, h) {
+                if let Some(g) = edge_map.insert(edge, h) {
                     // Fix next and previous for triangles
-                    let _next = n[_h];
-                    let _prev = p[_h];
-                    let next = n[h];
-                    let prev = p[h];
+                    let gN = n[g];
+                    let gP = p[g];
+                    let hN = n[h];
+                    let hP = p[h];
 
                     // TODO handle non-orientable and non-manifold meshes
-                    if _next == null || _prev == null || next == null || prev == null {
+                    if gN == NULL || gP == NULL || hN == NULL || hP == NULL {
                         panic!("Surface is not a 2-manifold");
                     }
 
-                    n[prev] = _next;
-                    p[_next] = prev;
-                    n[_prev] = next;
-                    p[next] = _prev;
+                    n[hP] = gN;
+                    p[gN] = hP;
+                    n[gP] = hN;
+                    p[hN] = gP;
 
                     // Reset next and previous half edges
-                    n[_h] = null;
-                    p[_h] = null;
-                    n[h] = null;
-                    p[h] = null;
+                    n[g] = NULL;
+                    p[g] = NULL;
+                    n[h] = NULL;
+                    p[h] = NULL;
 
-                    o[h] = _h;
-                    o[_h] = h;
+                    o[h] = g;
+                    o[g] = h;
                 }
             }
         }
 
-        let gate = match n.iter().find(|&x| *x != null) {
+        let gate = match n.iter().find(|&x| *x != NULL) {
             Some(&gate) => gate,
             None => Id(1),
         };
 
         // Find boundary
         let mut g = gate;
-        while g != null && e[g] != s[gate] {
+        while g != NULL && e[g] != s[gate] {
             let ev = e[g];
             boundary.push(ev);
             vm[ev] = true;
@@ -175,9 +183,12 @@ impl EdgeBreaker {
         boundary.push(s[gate]);
         vm[s[gate]] = true;
 
-        if n[gate] == null {
+        if n[gate] == NULL {
             n[gate] = o[gate];
             p[gate] = o[gate];
+            n[o[gate]] = gate;
+            p[o[gate]] = gate;
+            hm[o[gate]] = true;
         }
 
         Self {
@@ -246,10 +257,10 @@ impl EdgeBreaker {
                         // Case L
                         self.history.push(Op::L);
 
-                        let gno = self.o[self.n(g)];
-                        let gPP = self.p[self.p[g]];
-                        let gN = self.n[g];
                         let gP = self.p[g];
+                        let gPP = self.p[gP];
+                        let gno = self.o[self.n(g)];
+                        let gN = self.n[g];
 
                         // Flags
                         self.hm[g] = false;
@@ -340,7 +351,7 @@ impl EdgeBreaker {
     }
 
     fn n(&self, id: Id) -> Id {
-        assert!(id != Id(0));
+        assert!(id != NULL);
         let _id = id.0;
         let i = (_id - 1) % 3;
         let t = _id - 1 - i;
@@ -348,7 +359,7 @@ impl EdgeBreaker {
     }
 
     fn p(&self, id: Id) -> Id {
-        assert!(id != Id(0));
+        assert!(id != NULL);
         let _id = id.0;
         let i = (_id - 1) % 3;
         let t = _id - 1 - i;

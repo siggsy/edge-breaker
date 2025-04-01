@@ -22,6 +22,7 @@ impl Obj {
     fn values<T: Debug, const N: usize>(line: &str, conv: fn(&str) -> T) -> [T; N] {
         line.split(' ')
             .skip(1)
+            .filter(|x| !x.is_empty())
             .take(N)
             .map(conv)
             .collect::<Vec<T>>()
