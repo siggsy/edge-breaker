@@ -91,6 +91,10 @@ impl EdgeBreaker {
         eb
     }
 
+    pub fn decompress(&mut self) -> Obj {
+        todo!("Not yet implemented")
+    }
+
     fn init(obj: &Obj) -> Self {
         let capacity = obj.faces.len() * 3; // 0 == null
         let null = Id(0);
