@@ -69,6 +69,7 @@
               rustfmt
               rust-analyzer
               pkg-config
+              lldb
             ];
 
             PKG_CONFIG_PATH =

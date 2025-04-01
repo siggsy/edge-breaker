@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::ops::{Index, IndexMut};
+use std::fmt::Debug;
 
 use crate::obj::Obj;
 
@@ -54,8 +55,17 @@ impl Hash for Edge {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 struct Id(usize);
+
+impl Debug for Id {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            0 => write!(f, "NULL"),
+            id => write!(f, "#{}", id),
+        }
+    }
+}
 
 impl<T> Index<Id> for Vec<T> {
     type Output = T;
@@ -181,69 +191,138 @@ impl EdgeBreaker {
 
     fn run(&mut self) {
 
-        // Useful macro rules for dealing with parallel arrays
-        macro_rules! get {
-            ($half_edge:ident . $($other:tt)+) => (get!(expand $half_edge, $($other)+));
-            (expand $inner:expr, $acc:ident ()) => (self.$acc($inner));
-            (expand $inner:expr, $acc:ident) => (self.$acc[$inner]);
-            (expand $inner:expr, $acc:ident () . $($other:tt)+) => (get!(expand self.$acc($inner), $($other)+));
-            (expand $inner:expr, $acc:ident . $($other:tt)+) => (get!(expand self.$acc[$inner], $($other)+));
-        }
-
-        macro_rules! set {
-            ($val:expr, $half_edge:ident . $($other:tt)+) => (set!(expand $val, $half_edge, $($other)+));
-            (expand $val:expr, $inner:expr, $acc:ident) => {
-                {
-                    let id = $inner;
-                    self.$acc[id] = $val
-                }
-            };
-            (expand $val:expr, $inner:expr, $acc:ident () . $($other:tt)+) => (set!(expand $val, self.$acc($inner), $($other)+));
-            (expand $val:expr, $inner:expr, $acc:ident . $($other:tt)+) => (set!(expand $val, self.$acc[$inner], $($other)+));
-        }
-
         let mut stack = Vec::new();
         stack.push(self.gate);
 
         while let Some(g) = stack.pop() {
-            if !get!(g.v().vm) {
+            if !self.vm[self.v(g)] {
                 // Case C
                 self.history.push(Op::C);
                 self.previous.push(self.v(g));
 
+                let gpo = self.o[self.p(g)];
+                let gno = self.o[self.n(g)];
+                let gv = self.v(g);
+                let gN = self.n[g];
+                let gP = self.p[g];
+
                 // Fix flags
-                set!(false, g.hm);
-                set!(true, g.p().o.hm);
-                set!(true, g.n().o.hm);
-                set!(true, g.v().vm);
+                self.hm[g] = false;
+                self.hm[gpo] = true;
+                self.hm[gno] = true;
+                self.vm[gv] = true;
 
                 // Link 1
-                set!(get!(g.p), g.p().o.p);
-                set!(get!(g.p().o), g.p.n);
+                self.p[gpo] = self.p[g];
+                self.n[gP] = gpo;
 
                 // Link 2
-                set!(get!(g.n().o), g.p().o.n);
-                set!(get!(g.p().o), g.n().o.p);
+                self.n[gpo] = gno;
+                self.p[gno] = gpo;
 
                 // Link 3
-                set!(get!(g.n), g.n().o.n);
-                set!(get!(g.n().o), g.n.p);
+                self.n[gno] = gN;
+                self.p[gN] = gno;
+
+                stack.push(gno);
             } else {
-                if get!(g.p()) == get!(g.p) {
-                    if get!(g.n()) == get!(g.n) {
+                if self.p(g) == self.p[g] {
+                    if self.n(g) == self.n[g] {
                         // Case E
-                        // TODO
+                        self.history.push(Op::E);
+
+                        let gn = self.n(g);
+                        let gp = self.p(g);
+                        self.hm[g] = false;
+                        self.hm[gn] = false;
+                        self.hm[gp] = false;
                     } else {
                         // Case L
-                        // TODO
+                        self.history.push(Op::L);
+
+                        let gno = self.o[self.n(g)];
+                        let gPP = self.p[self.p[g]];
+                        let gN = self.n[g];
+                        let gP = self.p[g];
+
+                        // Flags
+                        self.hm[g] = false;
+                        self.hm[gP] = false;
+                        self.hm[gno] = true;
+
+                        // Link 1
+                        self.n[gPP] = gno;
+                        self.p[gno] = gPP;
+
+                        // Link 2
+                        self.n[gno] = gN;
+                        self.p[gN] = gno;
+
+                        stack.push(gno);
                     }
                 } else {
-                    if get!(g.n()) == get!(g.n) {
+                    if self.n(g) == self.n[g] {
                         // Case R
-                        // TODO
+                        self.history.push(Op::R);
+
+                        let gN = self.n[g];
+                        let gNN = self.n[gN];
+                        let gpo = self.o[self.p(g)];
+                        let gP = self.p[g];
+
+                        // Flags
+                        self.hm[g] = false;
+                        self.hm[gN] = false;
+                        self.hm[gpo] = true;
+
+                        // Link 1
+                        self.p[gNN] = gpo;
+                        self.n[gpo] = gNN;
+
+                        // Link 2
+                        self.p[gpo] = gP;
+                        self.n[gP] = gpo;
+
+                        stack.push(gpo);
                     } else {
                         // Case S
-                        // TODO
+                        self.history.push(Op::S);
+
+                        let gno = self.o[self.n(g)];
+                        let gpo = self.o[self.p(g)];
+                        let gN = self.n[g];
+                        let gP = self.p[g];
+
+                        // Flags
+                        self.hm[g] = false;
+                        self.hm[gpo] = true;
+                        self.hm[gno] = true;
+
+                        // Find b by rotating around v
+                        let mut b = self.n(g);
+                        while !self.hm[b] {
+                            b = self.p(self.o[b]);
+                        }
+
+                        // Link 1
+                        self.n[gP] = gpo;
+                        self.p[gpo] = gP;
+
+                        // Link 2
+                        let bN = self.n[b];
+                        self.n[gpo] = bN;
+                        self.p[bN] = gpo;
+
+                        // Link 3
+                        self.n[b] = gno;
+                        self.p[gno] = b;
+
+                        // Link 4
+                        self.n[gno] = gN;
+                        self.p[gN] = gno;
+
+                        stack.push(gpo);
+                        stack.push(gno);
                     }
                 }
             }
@@ -255,6 +334,7 @@ impl EdgeBreaker {
     }
 
     fn n(&self, id: Id) -> Id {
+        assert!(id != Id(0));
         let _id = id.0;
         let i = (_id - 1) % 3;
         let t = _id - 1 - i;
@@ -262,6 +342,7 @@ impl EdgeBreaker {
     }
 
     fn p(&self, id: Id) -> Id {
+        assert!(id != Id(0));
         let _id = id.0;
         let i = (_id - 1) % 3;
         let t = _id - 1 - i;
