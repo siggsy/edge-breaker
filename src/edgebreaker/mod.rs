@@ -8,7 +8,6 @@ use crate::obj::Obj;
 use edge::Edge;
 use id::Id;
 use id::NULL;
-use log::debug;
 use op::Op;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -19,7 +18,6 @@ use std::fmt::Debug;
 
 #[derive(Debug)]
 pub struct EdgeBreaker {
-    gate: Id,
     history: Vec<Op>,
     previous: Vec<Id>,
 }
@@ -130,15 +128,17 @@ impl HalfEdges {
 
 pub fn compress_obj(obj: &Obj) -> EdgeBreaker {
     let mut he = HalfEdges::init(obj);
-    debug!("faces.len: {:?}", obj.faces.len());
-    debug!("vertices.len: {:?}", obj.vertices.len());
     let eb = compress(&mut he);
-    debug!("gate: {:?}", eb.gate);
-    debug!("history: {:?}", eb.history);
-    debug!("history.len: {:?}", eb.history.len());
-    debug!("previous: {:?}", eb.previous);
-    debug!("previous.len: {:?}", eb.previous.len());
     eb
+}
+
+pub fn decompress_obj(eb: &EdgeBreaker, vertices: Vec<[f32; 3]>) -> Obj {
+    let faces = decompress(eb);
+
+    Obj {
+        faces,
+        vertices: eb.previous.iter().map(|&x| vertices[x]).collect()
+    }
 }
 
 // ,---------------------------------------------------------------------------
@@ -146,7 +146,6 @@ pub fn compress_obj(obj: &Obj) -> EdgeBreaker {
 // `---------------------------------------------------------------------------
 
 fn compress(he: &mut HalfEdges) -> EdgeBreaker {
-    let mut boundary = Vec::new();
     let mut history = Vec::new();
     let mut previous = Vec::new();
     let mut stack = Vec::new();
@@ -154,8 +153,8 @@ fn compress(he: &mut HalfEdges) -> EdgeBreaker {
     let mut vm = vec![false; he.vertex_count];
     let mut hm = vec![false; he.triangle_count * 3];
 
-    let gate = match he.n.iter().find(|&x| *x != NULL) {
-        Some(&gate) => gate,
+    let gate = match he.n.iter().position(|&x| x != NULL) {
+        Some(i) => Id::from_offset(i),
         None => Id::new(1),
     };
 
@@ -163,12 +162,12 @@ fn compress(he: &mut HalfEdges) -> EdgeBreaker {
     let mut g = gate;
     while g != NULL && he.e[g] != he.s[gate] {
         let ev = he.e[g];
-        boundary.push(ev);
+        previous.push(ev);
         vm[ev] = true;
         hm[g] = true;
         g = he.n[g];
     }
-    boundary.push(he.s[gate]);
+    previous.push(he.s[gate]);
     vm[he.s[gate]] = true;
 
     if he.n[gate] == NULL {
@@ -316,8 +315,162 @@ fn compress(he: &mut HalfEdges) -> EdgeBreaker {
     }
 
     EdgeBreaker {
-        gate,
         history,
         previous,
     }
+}
+
+fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
+    let t = eb.history.len();
+    let mut d: i32 = 0; // |S| - |E|
+    let mut c: usize = 0; // |C| = |V_i|
+    let mut e: i32 = 0; // 3|E| + |L| + |R| - |C| - |S| = |V_e|
+    let mut s: usize = 0; // |S|
+    let mut stack: Vec<(i32, usize)> = Vec::new();
+    let mut offsets: Vec<usize> = vec![0; eb.history.iter().filter(|&o| *o == Op::S).count()];
+    let mut edge_count = 0;
+
+    // ,----------------------------------------
+    // | Preprocessing phase
+
+    for op in eb.history.iter() {
+        match op {
+            Op::S => {
+                e -= 1;
+                stack.push((e, s));
+                s += 1;
+                d += 1;
+                edge_count += 1;
+            }
+
+            Op::E => {
+                e += 3;
+                edge_count += 3;
+                if d <= 0 {
+                    break;
+                }
+                let (_e, _s) = stack.pop().expect("(e,s) stack prematurely empty!");
+                offsets[_s] = (e - _e - 2)
+                    .try_into()
+                    .expect("Encountered negative S offset!");
+                d -= 1;
+            }
+
+            Op::C => {
+                e -= 1;
+                c += 1;
+                edge_count += 1;
+            }
+
+            Op::R => {
+                e += 1;
+                edge_count += 2;
+            }
+
+            Op::L => {
+                e += 1;
+                edge_count += 2;
+            }
+        }
+    }
+
+    // `----------------------------------------
+
+    // Sanity check
+    assert!(t == eb.history.len());
+    assert!(c as i32 + e == eb.previous.len() as i32);
+
+    // ,----------------------------------------
+    // | Generation phase
+
+    let mut tv: Vec<[usize; 3]> = Vec::with_capacity(t);
+    let mut vc = e as usize;
+    let mut ec: usize = 0;
+    s = 0;
+
+    // Create bounding loop
+    let mut end = vec![NULL; edge_count]; // Planar graphs
+    let mut next = vec![NULL; edge_count];
+    let mut prev = vec![NULL; edge_count];
+
+    for v in 0..vc {
+        next[v] = Id::from_offset((v + 1) % vc);
+        prev[v] = Id::from_offset((v + vc - 1) % vc);
+        end[v] = Id::from_offset(ec);
+        ec += 1;
+    }
+
+    let mut g = Id::new(1);
+    let mut stack: Vec<Id> = vec![g];
+    for op in eb.history.iter() {
+        match op {
+            Op::C => {
+                let gp = prev[g];
+                vc += 1;
+                tv.push([end[gp].id(), end[g].id(), vc]);
+
+                ec += 1;
+                let a = Id::new(ec);
+
+                end[a] = Id::new(vc);
+                next[gp] = a;
+                prev[a] = prev[g];
+                next[a] = g;
+                prev[g] = a;
+            }
+
+            Op::R => {
+                let gp = prev[g];
+                let gn = next[g];
+                tv.push([end[gp].id(), end[g].id(), end[gn].id()]);
+                next[gp] = gn;
+                prev[gn] = gp;
+                g = gn;
+            }
+
+            Op::L => {
+                let gp = prev[g];
+                let gpp = prev[gp];
+                tv.push([end[gp].id(), end[g].id(), end[gpp].id()]);
+
+                prev[g] = gpp;
+                next[gpp] = g;
+
+            }
+
+            Op::E => {
+                let gp = prev[g];
+                let gn = next[g];
+                tv.push([end[gp].id(), end[g].id(), end[gn].id()]);
+                
+                g = stack.pop().expect("Hmmmmmmm :(");
+            }
+
+            Op::S => {
+                let gp = prev[g];
+                let mut d = next[g];
+                for _ in 0..offsets[s] {
+                    d = next[d];
+                }
+                s += 1;
+
+                tv.push([end[gp].id(), end[g].id(), end[d].id()]);
+                
+                ec += 1;
+                let a = Id::new(ec);
+                end[a] = end[d];
+                next[gp] = a;
+                prev[a] = gp;
+
+                stack.push(a);
+                let dn = next[d];
+                next[a] = dn;
+                prev[dn] = a;
+                prev[g] = d;
+                next[d] = g;
+            }
+        }
+    }
+
+    tv
 }

@@ -30,6 +30,10 @@ impl Id {
     pub fn offset(&self) -> usize {
         self.0 - 1
     }
+
+    pub fn id(&self) -> usize {
+        self.0
+    }
 }
 
 impl Debug for Id {

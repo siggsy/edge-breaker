@@ -14,9 +14,10 @@ static LOG_LEVEL: LevelFilter = LevelFilter::Debug;
 fn main() -> std::io::Result<()> {
     let _ = log::set_logger(&LOGGER).map(|()| log::set_max_level(LOG_LEVEL));
     let mut reader = BufReader::new(File::open(
-        args().nth(1).unwrap_or(String::from("./assets/bunny.obj")),
+        args().nth(1).unwrap_or(String::from("./assets/eb-example.obj")),
     )?);
     let obj = Obj::read(&mut reader);
     let eb = edgebreaker::compress_obj(&obj);
+    let _obj = edgebreaker::decompress_obj(&eb, obj.vertices);
     Ok(())
 }
