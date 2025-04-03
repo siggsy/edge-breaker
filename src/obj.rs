@@ -45,7 +45,7 @@ impl Obj {
                 },
                 Some('f') => faces.push(Obj::values(&line, Obj::parse_index)),
                 Some('#') => continue,
-                _ => warn!("Failed to parse line: {line}"),
+                _ => warn!("Failed to parse line {i}: {line}"),
             }
         }
 
