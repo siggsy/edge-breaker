@@ -12,9 +12,11 @@ static LOGGER: Logger = Logger;
 static LOG_LEVEL: LevelFilter = LevelFilter::Debug;
 
 fn main() -> std::io::Result<()> {
+    let fallback = String::from("./assets/cube.obj");
+
     let _ = log::set_logger(&LOGGER).map(|()| log::set_max_level(LOG_LEVEL));
     let mut reader = BufReader::new(File::open(
-        args().nth(1).unwrap_or(String::from("./assets/eb-example.obj")),
+        args().nth(1).unwrap_or(fallback),
     )?);
     let obj = Obj::read(&mut reader);
     let eb = edgebreaker::compress_obj(&obj);

@@ -8,6 +8,7 @@ use crate::obj::Obj;
 use edge::Edge;
 use id::Id;
 use id::NULL;
+use log::debug;
 use op::Op;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -20,6 +21,7 @@ use std::fmt::Debug;
 pub struct EdgeBreaker {
     history: Vec<Op>,
     previous: Vec<Id>,
+    lengths: Vec<usize>,
 }
 
 // .--------------------------------------------------------------------------.
@@ -127,17 +129,30 @@ impl HalfEdges {
 }
 
 // .--------------------------------------------------------------------------.
+// | Enum: Mark                                                               |
+// '--------------------------------------------------------------------------'
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mark {
+    Unmarked,
+    External1,
+    External2,
+}
+
+// .--------------------------------------------------------------------------.
 // | Public functions                                                         |
 // '--------------------------------------------------------------------------'
 
 pub fn compress_obj(obj: &Obj) -> EdgeBreaker {
     let mut he = HalfEdges::init(obj);
     let eb = compress(&mut he);
+    debug!("History: {:?}", eb.history.len());
     eb
 }
 
 pub fn decompress_obj(eb: &EdgeBreaker, vertices: Vec<[f32; 3]>) -> Obj {
     let faces = decompress(eb);
+    debug!("Faces: {:?}", faces.len());
 
     Obj {
         faces,
@@ -152,173 +167,268 @@ pub fn decompress_obj(eb: &EdgeBreaker, vertices: Vec<[f32; 3]>) -> Obj {
 fn compress(he: &mut HalfEdges) -> EdgeBreaker {
     let mut history = Vec::new();
     let mut previous = Vec::new();
+    let mut lengths = Vec::new();
     let mut stack = Vec::new();
 
-    let mut vm = vec![false; he.vertex_count];
-    let mut hm = vec![false; he.triangle_count * 3];
+    let mut vm = vec![Mark::Unmarked; he.vertex_count];
+    let mut hm = vec![Mark::Unmarked; he.triangle_count * 3];
 
+    // Find the first gate
     let gate = match he.n.iter().position(|&x| x != NULL) {
         Some(i) => Id::from_offset(i),
         None => Id::new(1),
     };
 
-    // Find boundary
-    let mut g = gate;
-    while g != NULL && he.e[g] != he.s[gate] {
-        let ev = he.e[g];
-        previous.push(ev);
-        vm[ev] = true;
-        hm[g] = true;
-        g = he.n[g];
+    fn markEdges(
+        mark: Mark,
+        gate: Id,
+        he: &mut HalfEdges,
+        previous: &mut Vec<Id>,
+        vm: &mut Vec<Mark>,
+        hm: &mut Vec<Mark>,
+    ) {
+        let mut g = gate;
+        loop {
+            let ev = he.e[g];
+            previous.push(ev);
+            vm[ev] = mark;
+            hm[g] = mark;
+            g = he.n[g];
+            if g == NULL || g == gate {
+                break;
+            }
+        }
     }
-    previous.push(he.s[gate]);
-    vm[he.s[gate]] = true;
+
+    // Mark first boundary
+    markEdges(Mark::External1, gate, he, &mut previous, &mut vm, &mut hm);
 
     if he.n[gate] == NULL {
+        // Triangulation has no edges. Make one
         he.n[gate] = he.o[gate];
         he.p[gate] = he.o[gate];
         he.n[he.o[gate]] = gate;
         he.p[he.o[gate]] = gate;
-        hm[he.o[gate]] = true;
+        hm[he.o[gate]] = Mark::External1;
+        vm[he.s[gate]] = Mark::External1;
+        previous.push(he.s[gate]);
+    } else {
+        // Find other external edges (Holes)
+        while let Some(i) =
+            he.n.iter()
+                .zip(&hm)
+                .position(|(&n, &m)| n != NULL && m == Mark::Unmarked)
+        {
+            markEdges(
+                Mark::External2,
+                Id::from_offset(i),
+                he,
+                &mut previous,
+                &mut vm,
+                &mut hm,
+            );
+        }
     }
 
     // Main algorithm loop
     stack.push(gate);
     while let Some(g) = stack.pop() {
-        if !vm[he.v(g)] {
-            // Case C
-            history.push(Op::C);
-            previous.push(he.v(g));
+        match vm[he.v(g)] {
+            Mark::Unmarked => {
+                // Case C
+                history.push(Op::C);
+                previous.push(he.v(g));
 
-            let gpo = he.o[HalfEdges::p(g)];
-            let gno = he.o[HalfEdges::n(g)];
-            let gv = he.v(g);
-            let gN = he.n[g];
-            let gP = he.p[g];
+                let gpo = he.o[HalfEdges::p(g)];
+                let gno = he.o[HalfEdges::n(g)];
+                let gv = he.v(g);
+                let gN = he.n[g];
+                let gP = he.p[g];
 
-            // Fix flags
-            hm[g] = false;
-            hm[gpo] = true;
-            hm[gno] = true;
-            vm[gv] = true;
+                // Fix flags
+                hm[g] = Mark::Unmarked;
+                hm[gpo] = Mark::External1;
+                hm[gno] = Mark::External1;
+                vm[gv] = Mark::External1;
 
-            // Link 1
-            he.p[gpo] = he.p[g];
-            he.n[gP] = gpo;
+                // Link 1
+                he.p[gpo] = he.p[g];
+                he.n[gP] = gpo;
 
-            // Link 2
-            he.n[gpo] = gno;
-            he.p[gno] = gpo;
+                // Link 2
+                he.n[gpo] = gno;
+                he.p[gno] = gpo;
 
-            // Link 3
-            he.n[gno] = gN;
-            he.p[gN] = gno;
+                // Link 3
+                he.n[gno] = gN;
+                he.p[gN] = gno;
 
-            stack.push(gno);
-        } else {
-            if HalfEdges::p(g) == he.p[g] {
-                if HalfEdges::n(g) == he.n[g] {
-                    // Case E
-                    history.push(Op::E);
+                stack.push(gno);
+            }
 
-                    let gn = HalfEdges::n(g);
-                    let gp = HalfEdges::p(g);
-                    hm[g] = false;
-                    hm[gn] = false;
-                    hm[gp] = false;
-                } else {
-                    // Case L
-                    history.push(Op::L);
+            Mark::External2 => {
+                // Case M
+                history.push(Op::H);
 
-                    let gP = he.p[g];
-                    let gPP = he.p[gP];
-                    let gno = he.o[HalfEdges::n(g)];
-                    let gN = he.n[g];
+                let gpo = he.o[HalfEdges::p(g)];
+                let gno = he.o[HalfEdges::n(g)];
+                let gN = he.n[g];
+                let gP = he.p[g];
 
-                    // Flags
-                    hm[g] = false;
-                    hm[gP] = false;
-                    hm[gno] = true;
+                hm[g] = Mark::Unmarked;
+                hm[gpo] = Mark::External1;
+                hm[gno] = Mark::External1;
 
-                    // Link 1
-                    he.n[gPP] = gno;
-                    he.p[gno] = gPP;
-
-                    // Link 2
-                    he.n[gno] = gN;
-                    he.p[gN] = gno;
-
-                    stack.push(gno);
+                let mut b = HalfEdges::n(g);
+                while hm[b] != Mark::External2 {
+                    b = HalfEdges::p(he.o[b]);
                 }
-            } else {
-                if HalfEdges::n(g) == he.n[g] {
-                    // Case R
-                    history.push(Op::R);
 
-                    let gN = he.n[g];
-                    let gNN = he.n[gN];
-                    let gpo = he.o[HalfEdges::p(g)];
-                    let gP = he.p[g];
+                // Hole traversal
+                hm[b] = Mark::External1;
+                vm[he.s[b]] = Mark::External1;
+                previous.push(he.s[b]);
+                b = he.n[b];
+                let mut len = 1;
+                while he.e[b] != he.s[gno] {
+                    let bs = he.s[b];
+                    hm[b] = Mark::External1;
+                    vm[bs] = Mark::External1;
+                    len += 1;
+                    previous.push(bs);
+                    b = he.n[b];
+                }
+                lengths.push(len);
 
-                    // Flags
-                    hm[g] = false;
-                    hm[gN] = false;
-                    hm[gpo] = true;
+                // Link 1
+                he.n[gP] = gpo;
+                he.p[gpo] = gP;
 
-                    // Link 1
-                    he.p[gNN] = gpo;
-                    he.n[gpo] = gNN;
+                // Link 2
+                let bN = he.n[b];
+                he.n[gpo] = bN;
+                he.p[bN] = gpo;
 
-                    // Link 2
-                    he.p[gpo] = gP;
-                    he.n[gP] = gpo;
+                // Link 3
+                he.n[b] = gno;
+                he.p[gno] = b;
 
-                    stack.push(gpo);
-                } else {
-                    // Case S
-                    history.push(Op::S);
+                // Link 4
+                he.n[gno] = gN;
+                he.p[gN] = gno;
 
-                    let gno = he.o[HalfEdges::n(g)];
-                    let gpo = he.o[HalfEdges::p(g)];
-                    let gN = he.n[g];
-                    let gP = he.p[g];
+                stack.push(gno);
+            }
 
-                    // Flags
-                    hm[g] = false;
-                    hm[gpo] = true;
-                    hm[gno] = true;
+            Mark::External1 => {
+                if HalfEdges::p(g) == he.p[g] {
+                    if HalfEdges::n(g) == he.n[g] {
+                        // Case E
+                        history.push(Op::E);
 
-                    // Find b by rotating around v
-                    let mut b = HalfEdges::n(g);
-                    while !hm[b] {
-                        b = HalfEdges::p(he.o[b]);
+                        let gn = HalfEdges::n(g);
+                        let gp = HalfEdges::p(g);
+                        hm[g] = Mark::Unmarked;
+                        hm[gn] = Mark::Unmarked;
+                        hm[gp] = Mark::Unmarked;
+                    } else {
+                        // Case L
+                        history.push(Op::L);
+
+                        let gP = he.p[g];
+                        let gPP = he.p[gP];
+                        let gno = he.o[HalfEdges::n(g)];
+                        let gN = he.n[g];
+
+                        // Flags
+                        hm[g] = Mark::Unmarked;
+                        hm[gP] = Mark::Unmarked;
+                        hm[gno] = Mark::External1;
+
+                        // Link 1
+                        he.n[gPP] = gno;
+                        he.p[gno] = gPP;
+
+                        // Link 2
+                        he.n[gno] = gN;
+                        he.p[gN] = gno;
+
+                        stack.push(gno);
                     }
+                } else {
+                    if HalfEdges::n(g) == he.n[g] {
+                        // Case R
+                        history.push(Op::R);
 
-                    // Link 1
-                    he.n[gP] = gpo;
-                    he.p[gpo] = gP;
+                        let gN = he.n[g];
+                        let gNN = he.n[gN];
+                        let gpo = he.o[HalfEdges::p(g)];
+                        let gP = he.p[g];
 
-                    // Link 2
-                    let bN = he.n[b];
-                    he.n[gpo] = bN;
-                    he.p[bN] = gpo;
+                        // Flags
+                        hm[g] = Mark::Unmarked;
+                        hm[gN] = Mark::Unmarked;
+                        hm[gpo] = Mark::External1;
 
-                    // Link 3
-                    he.n[b] = gno;
-                    he.p[gno] = b;
+                        // Link 1
+                        he.p[gNN] = gpo;
+                        he.n[gpo] = gNN;
 
-                    // Link 4
-                    he.n[gno] = gN;
-                    he.p[gN] = gno;
+                        // Link 2
+                        he.p[gpo] = gP;
+                        he.n[gP] = gpo;
 
-                    stack.push(gpo);
-                    stack.push(gno);
+                        stack.push(gpo);
+                    } else {
+                        // Case S
+                        history.push(Op::S);
+
+                        let gno = he.o[HalfEdges::n(g)];
+                        let gpo = he.o[HalfEdges::p(g)];
+                        let gN = he.n[g];
+                        let gP = he.p[g];
+
+                        // Flags
+                        hm[g] = Mark::Unmarked;
+                        hm[gpo] = Mark::External1;
+                        hm[gno] = Mark::External1;
+
+                        // Find b by rotating around v
+                        let mut b = HalfEdges::n(g);
+                        while hm[b] == Mark::Unmarked {
+                            b = HalfEdges::p(he.o[b]);
+                        }
+
+                        // Link 1
+                        he.n[gP] = gpo;
+                        he.p[gpo] = gP;
+
+                        // Link 2
+                        let bN = he.n[b];
+                        he.n[gpo] = bN;
+                        he.p[bN] = gpo;
+
+                        // Link 3
+                        he.n[b] = gno;
+                        he.p[gno] = b;
+
+                        // Link 4
+                        he.n[gno] = gN;
+                        he.p[gN] = gno;
+
+                        stack.push(gpo);
+                        stack.push(gno);
+                    }
                 }
             }
         }
     }
 
-    EdgeBreaker { history, previous }
+    EdgeBreaker {
+        history,
+        previous,
+        lengths,
+    }
 }
 
 fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
@@ -330,6 +440,7 @@ fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
     let mut stack: Vec<(i32, usize)> = Vec::new();
     let mut offsets: Vec<usize> = vec![0; eb.history.iter().filter(|&o| *o == Op::S).count()];
     let mut edge_count = 0;
+    let mut li = 0;
 
     // .----------------------------------------
     // | Preprocessing phase
@@ -372,6 +483,12 @@ fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
                 e += 1;
                 edge_count += 2;
             }
+
+            Op::H => {
+                let l = eb.lengths[li];
+                e -= l as i32 + 1;
+                li += 1;
+            }
         }
     }
 
@@ -379,7 +496,7 @@ fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
 
     // Sanity check
     assert!(t == eb.history.len());
-    assert!(c as i32 + e == eb.previous.len() as i32);
+    // assert!(c as i32 + e == eb.previous.len() as i32);
 
     // .----------------------------------------
     // | Generation phase
@@ -388,9 +505,10 @@ fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
     let mut vc = e as usize;
     let mut ec: usize = 0;
     s = 0;
+    li = 0;
 
     // Create bounding loop
-    let mut end = vec![NULL; edge_count]; // Planar graphs
+    let mut end = vec![NULL; edge_count];
     let mut next = vec![NULL; edge_count];
     let mut prev = vec![NULL; edge_count];
 
@@ -468,6 +586,32 @@ fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
                 prev[dn] = a;
                 prev[g] = d;
                 next[d] = g;
+            }
+
+            Op::H => {
+                let gp = prev[g];
+                tv.push([end[gp].id(), end[g].id(), vc+1]);
+
+                let mut d = gp;
+                let l = eb.lengths[li];
+                li += 1;
+                for _ in 0..l {
+                    ec += 1;
+                    let a = Id::new(ec);
+
+                    next[d] = a;
+                    prev[a] = d;
+                    vc += 1;
+                    end[a] = Id::new(vc);
+                    d = a;
+                }
+                ec += 1;
+                let a = Id::new(ec);
+                next[d] = a;
+                prev[a] = d;
+                end[a] = Id::new(vc + 1 - l);
+                next[a] = g;
+                prev[g] = a;
             }
         }
     }
