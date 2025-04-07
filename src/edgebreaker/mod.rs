@@ -12,15 +12,19 @@ use op::Op;
 use std::collections::HashMap;
 use std::fmt::Debug;
 
-// ,---------------------------------------------------------------------------
-// | Structs
-// `---------------------------------------------------------------------------
+// .--------------------------------------------------------------------------.
+// | Struct: EdgeBreaker                                                      |
+// '--------------------------------------------------------------------------'
 
 #[derive(Debug)]
 pub struct EdgeBreaker {
     history: Vec<Op>,
     previous: Vec<Id>,
 }
+
+// .--------------------------------------------------------------------------.
+// | Struct: HalfEdges                                                        |
+// '--------------------------------------------------------------------------'
 
 #[derive(Debug)]
 struct HalfEdges {
@@ -122,9 +126,9 @@ impl HalfEdges {
     }
 }
 
-// ,---------------------------------------------------------------------------
-// | Public functions
-// `---------------------------------------------------------------------------
+// .--------------------------------------------------------------------------.
+// | Public functions                                                         |
+// '--------------------------------------------------------------------------'
 
 pub fn compress_obj(obj: &Obj) -> EdgeBreaker {
     let mut he = HalfEdges::init(obj);
@@ -137,13 +141,13 @@ pub fn decompress_obj(eb: &EdgeBreaker, vertices: Vec<[f32; 3]>) -> Obj {
 
     Obj {
         faces,
-        vertices: eb.previous.iter().map(|&x| vertices[x]).collect()
+        vertices: eb.previous.iter().map(|&x| vertices[x]).collect(),
     }
 }
 
-// ,---------------------------------------------------------------------------
-// | Internal functions
-// `---------------------------------------------------------------------------
+// .--------------------------------------------------------------------------.
+// | Internal functions                                                       |
+// '--------------------------------------------------------------------------'
 
 fn compress(he: &mut HalfEdges) -> EdgeBreaker {
     let mut history = Vec::new();
@@ -314,10 +318,7 @@ fn compress(he: &mut HalfEdges) -> EdgeBreaker {
         }
     }
 
-    EdgeBreaker {
-        history,
-        previous,
-    }
+    EdgeBreaker { history, previous }
 }
 
 fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
@@ -330,7 +331,7 @@ fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
     let mut offsets: Vec<usize> = vec![0; eb.history.iter().filter(|&o| *o == Op::S).count()];
     let mut edge_count = 0;
 
-    // ,----------------------------------------
+    // .----------------------------------------
     // | Preprocessing phase
 
     for op in eb.history.iter() {
@@ -374,13 +375,13 @@ fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
         }
     }
 
-    // `----------------------------------------
+    // '----------------------------------------
 
     // Sanity check
     assert!(t == eb.history.len());
     assert!(c as i32 + e == eb.previous.len() as i32);
 
-    // ,----------------------------------------
+    // .----------------------------------------
     // | Generation phase
 
     let mut tv: Vec<[usize; 3]> = Vec::with_capacity(t);
@@ -435,14 +436,13 @@ fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
 
                 prev[g] = gpp;
                 next[gpp] = g;
-
             }
 
             Op::E => {
                 let gp = prev[g];
                 let gn = next[g];
                 tv.push([end[gp].id(), end[g].id(), end[gn].id()]);
-                
+
                 g = stack.pop().expect("Hmmmmmmm :(");
             }
 
@@ -455,7 +455,7 @@ fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
                 s += 1;
 
                 tv.push([end[gp].id(), end[g].id(), end[d].id()]);
-                
+
                 ec += 1;
                 let a = Id::new(ec);
                 end[a] = end[d];
@@ -471,6 +471,8 @@ fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
             }
         }
     }
+
+    // '----------------------------------------
 
     tv
 }
