@@ -1,11 +1,9 @@
 #![allow(non_snake_case)]
 
-mod edge;
 mod id;
 mod op;
 
 use crate::obj::Obj;
-use edge::Edge;
 use id::Id;
 use id::NULL;
 use log::debug;
@@ -21,6 +19,7 @@ use std::fmt::Debug;
 pub struct EdgeBreaker {
     history: Vec<Op>,
     previous: Vec<Id>,
+    duplicated: Vec<Id>,
     lengths: Vec<usize>,
 }
 
@@ -32,6 +31,7 @@ pub struct EdgeBreaker {
 struct HalfEdges {
     vertex_count: usize,
     triangle_count: usize,
+    duplicated: Vec<Id>,
     s: Vec<Id>,
     e: Vec<Id>,
     n: Vec<Id>,
@@ -42,13 +42,15 @@ struct HalfEdges {
 impl HalfEdges {
     fn init(obj: &Obj) -> Self {
         let capacity = obj.faces.len() * 3;
+        let vertex_count = obj.vertices.len();
+        let mut dup_vertices = Vec::new();
         let mut s: Vec<Id> = vec![NULL; capacity];
         let mut e: Vec<Id> = vec![NULL; capacity];
         let mut n: Vec<Id> = vec![NULL; capacity];
         let mut p: Vec<Id> = vec![NULL; capacity];
         let mut o: Vec<Id> = vec![NULL; capacity];
 
-        let mut edge_map: HashMap<Edge, Id> = HashMap::new();
+        let mut edge_map: HashMap<(usize, usize), Id> = HashMap::new();
         for (t, face) in obj.faces.iter().enumerate() {
             let offset = t * 3;
 
@@ -65,40 +67,60 @@ impl HalfEdges {
             // Check for collisions and fix boundary
             for i in 0..3 {
                 let h = Id::from_offset(i + offset);
-                let edge = Edge::new(face[i], face[(i + 1) % 3]);
+                let a = face[i];
+                let b = face[(i + 1) % 3];
 
-                if let Some(g) = edge_map.insert(edge, h) {
+                if let Some(&g) = edge_map.get(&(b, a)) {
                     // Fix next and previous for triangles
                     let gN = n[g];
                     let gP = p[g];
                     let hN = n[h];
                     let hP = p[h];
 
-                    // TODO handle non-orientable and non-manifold meshes
                     if gN == NULL || gP == NULL || hN == NULL || hP == NULL {
-                        panic!("Surface is not a 2-manifold");
+                        // non-surface edge: colided edge is already internal
+                        // Detach by duplicating vertices
+                        dup_vertices.push(s[h]);
+                        s[h] = Id::new(dup_vertices.len() + vertex_count);
+                        dup_vertices.push(e[h]);
+                        e[h] = Id::new(dup_vertices.len() + vertex_count);
+                        edge_map.insert((s[h].offset(), e[h].offset()), h);
+                    } else {
+                        // First collision: make half edges internal
+
+                        // Connect border loops
+                        n[hP] = gN;
+                        p[gN] = hP;
+                        n[gP] = hN;
+                        p[hN] = gP;
+
+                        // Remove border loop for colided half edges
+                        n[g] = NULL;
+                        p[g] = NULL;
+                        n[h] = NULL;
+                        p[h] = NULL;
+
+                        // h and g are opposites
+                        o[h] = g;
+                        o[g] = h;
                     }
-
-                    n[hP] = gN;
-                    p[gN] = hP;
-                    n[gP] = hN;
-                    p[hN] = gP;
-
-                    // Reset next and previous half edges
-                    n[g] = NULL;
-                    p[g] = NULL;
-                    n[h] = NULL;
-                    p[h] = NULL;
-
-                    o[h] = g;
-                    o[g] = h;
+                } else if let Some(_) = edge_map.get(&(a, b)) {
+                    // non-orientable edge: duplicate vertices
+                    dup_vertices.push(s[h]);
+                    s[h] = Id::new(dup_vertices.len() + vertex_count);
+                    dup_vertices.push(e[h]);
+                    e[h] = Id::new(dup_vertices.len() + vertex_count);
+                    edge_map.insert((s[h].offset(), e[h].offset()), h);
+                } else {
+                    edge_map.insert((a, b), h);
                 }
             }
         }
 
         Self {
-            vertex_count: obj.vertices.len(),
+            vertex_count: vertex_count + dup_vertices.len(),
             triangle_count: obj.faces.len(),
+            duplicated: dup_vertices,
             s,
             e,
             n,
@@ -146,13 +168,13 @@ enum Mark {
 pub fn compress_obj(obj: &Obj) -> EdgeBreaker {
     let mut he = HalfEdges::init(obj);
     let eb = compress(&mut he);
-    debug!("History: {:?}", eb.history.len());
+    debug!("History: {:?}", eb.history);
     eb
 }
 
 pub fn decompress_obj(eb: &EdgeBreaker, vertices: Vec<[f32; 3]>) -> Obj {
     let faces = decompress(eb);
-    debug!("Faces: {:?}", faces.len());
+    debug!("Faces: {:?}", faces);
 
     Obj {
         faces,
@@ -165,6 +187,7 @@ pub fn decompress_obj(eb: &EdgeBreaker, vertices: Vec<[f32; 3]>) -> Obj {
 // '--------------------------------------------------------------------------'
 
 fn compress(he: &mut HalfEdges) -> EdgeBreaker {
+    // TODO: handle detached components
     let mut history = Vec::new();
     let mut previous = Vec::new();
     let mut lengths = Vec::new();
@@ -285,18 +308,17 @@ fn compress(he: &mut HalfEdges) -> EdgeBreaker {
                 }
 
                 // Hole traversal
-                hm[b] = Mark::External1;
-                vm[he.s[b]] = Mark::External1;
-                previous.push(he.s[b]);
-                b = he.n[b];
-                let mut len = 1;
-                while he.e[b] != he.s[gno] {
+                let mut len = 0;
+                loop {
                     let bs = he.s[b];
                     hm[b] = Mark::External1;
                     vm[bs] = Mark::External1;
                     len += 1;
                     previous.push(bs);
                     b = he.n[b];
+                    if he.e[b] == he.s[gno] {
+                        break;
+                    }
                 }
                 lengths.push(len);
 
@@ -428,6 +450,7 @@ fn compress(he: &mut HalfEdges) -> EdgeBreaker {
         history,
         previous,
         lengths,
+        duplicated: he.duplicated.clone(),
     }
 }
 
@@ -590,7 +613,7 @@ fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
 
             Op::H => {
                 let gp = prev[g];
-                tv.push([end[gp].id(), end[g].id(), vc+1]);
+                tv.push([end[gp].id(), end[g].id(), vc + 1]);
 
                 let mut d = gp;
                 let l = eb.lengths[li];
@@ -618,5 +641,16 @@ fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
 
     // '----------------------------------------
 
+    dbg!(vc);
+    dbg!(&eb.duplicated);
+    let vertex_count = vc + 1 - eb.duplicated.len();
+    for t in tv.iter_mut() {
+        for v in t.iter_mut() {
+            dbg!(&v);
+            if *v >= vertex_count {
+                *v = eb.duplicated[*v - vertex_count].id();
+            }
+        }
+    }
     tv
 }
