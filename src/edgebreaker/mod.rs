@@ -54,6 +54,37 @@ impl HalfEdges {
         for (t, face) in obj.faces.iter().enumerate() {
             let offset = t * 3;
 
+            let mut face = face.clone();
+
+            // Duplicate to fix non-manifolds
+            for i in 0..3 {
+                let h = Id::from_offset(i + offset);
+                let a = face[i];
+                let b = face[(i + 1) % 3];
+                if let Some(&g) = edge_map.get(&(b, a)) {
+                    // Fix next and previous for triangles
+                    let gN = n[g];
+                    let gP = p[g];
+                    let hN = n[h];
+                    let hP = p[h];
+
+                    if gN == NULL || gP == NULL || hN == NULL || hP == NULL {
+                        // non-manifold edge: colided edge is already internal
+                        // Detach by duplicating vertices
+                        dup_vertices.push(Id::new(a));
+                        face[i] = dup_vertices.len() + vertex_count;
+                        dup_vertices.push(Id::new(b));
+                        face[(i + 1) % 3] = dup_vertices.len() + vertex_count;
+                    }
+                } else if let Some(_) = edge_map.get(&(a, b)) {
+                    // non-orientable edge: duplicate vertices
+                    dup_vertices.push(Id::new(a));
+                    face[i] = dup_vertices.len() + vertex_count;
+                    dup_vertices.push(Id::new(b));
+                    face[(i + 1) % 3] = dup_vertices.len() + vertex_count;
+                }
+            }
+
             // Construct half-edges from triangle
             for i in 0..3 {
                 let h = Id::from_offset(i + offset);
@@ -67,8 +98,8 @@ impl HalfEdges {
             // Check for collisions and fix boundary
             for i in 0..3 {
                 let h = Id::from_offset(i + offset);
-                let a = face[i];
-                let b = face[(i + 1) % 3];
+                let a = s[h].offset();
+                let b = e[h].offset();
 
                 if let Some(&g) = edge_map.get(&(b, a)) {
                     // Fix next and previous for triangles
@@ -78,13 +109,8 @@ impl HalfEdges {
                     let hP = p[h];
 
                     if gN == NULL || gP == NULL || hN == NULL || hP == NULL {
-                        // non-surface edge: colided edge is already internal
-                        // Detach by duplicating vertices
-                        dup_vertices.push(s[h]);
-                        s[h] = Id::new(dup_vertices.len() + vertex_count);
-                        dup_vertices.push(e[h]);
-                        e[h] = Id::new(dup_vertices.len() + vertex_count);
-                        edge_map.insert((s[h].offset(), e[h].offset()), h);
+                        // non-manifold edge.
+                        edge_map.insert((a, b), h);
                     } else {
                         // First collision: make half edges internal
 
@@ -105,12 +131,8 @@ impl HalfEdges {
                         o[g] = h;
                     }
                 } else if let Some(_) = edge_map.get(&(a, b)) {
-                    // non-orientable edge: duplicate vertices
-                    dup_vertices.push(s[h]);
-                    s[h] = Id::new(dup_vertices.len() + vertex_count);
-                    dup_vertices.push(e[h]);
-                    e[h] = Id::new(dup_vertices.len() + vertex_count);
-                    edge_map.insert((s[h].offset(), e[h].offset()), h);
+                    // non-orientable edge
+                    edge_map.insert((a, b), h);
                 } else {
                     edge_map.insert((a, b), h);
                 }
@@ -167,6 +189,7 @@ enum Mark {
 
 pub fn compress_obj(obj: &Obj) -> EdgeBreaker {
     let mut he = HalfEdges::init(obj);
+    debug!("he: {:?}", he);
     let eb = compress(&mut he);
     debug!("History: {:?}", eb.history);
     eb
@@ -202,7 +225,7 @@ fn compress(he: &mut HalfEdges) -> EdgeBreaker {
         None => Id::new(1),
     };
 
-    debug!("gate: {:?} ({:?}, {:?})", gate, he.n[gate], he.p[gate]);
+    debug!("gate: {:?} ({:?}, {:?})", gate, he.s[gate], he.e[gate]);
 
     fn markEdges(
         mark: Mark,
@@ -215,6 +238,7 @@ fn compress(he: &mut HalfEdges) -> EdgeBreaker {
         let mut g = gate;
         loop {
             let ev = he.e[g];
+            debug!("boundary: {:?}", ev);
             previous.push(ev);
             vm[ev] = mark;
             hm[g] = mark;
