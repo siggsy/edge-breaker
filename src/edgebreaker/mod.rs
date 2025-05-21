@@ -169,6 +169,7 @@ pub fn compress_obj(obj: &Obj) -> EdgeBreaker {
     let eb = compress(&mut he);
     debug!("History: {:?}", eb.history);
     debug!("Previous: {:?}", eb.previous);
+    debug!("Lengths: {:?}", eb.lengths);
     eb
 }
 
@@ -253,7 +254,9 @@ fn compress(he: &mut HalfEdges) -> EdgeBreaker {
             }
 
             // Mark as boundary
-            previous.push(ev);
+            if mark == Mark::External1 {
+                previous.push(ev);
+            }
             vm[ev] = mark;
             hm[g] = mark;
             g = he.n[g];
@@ -363,7 +366,7 @@ fn compress(he: &mut HalfEdges) -> EdgeBreaker {
                     hm[b] = Mark::External1;
                     vm[bs] = Mark::External1;
                     len += 1;
-                    previous.push(bs);
+                    previous.push(he.e[b]);
                     b = he.n[b];
                     if he.e[b] == he.s[gno] {
                         break;
