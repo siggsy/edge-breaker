@@ -202,6 +202,8 @@ fn compress(he: &mut HalfEdges) -> EdgeBreaker {
         None => Id::new(1),
     };
 
+    debug!("gate: {:?} ({:?}, {:?})", gate, he.n[gate], he.p[gate]);
+
     fn markEdges(
         mark: Mark,
         gate: Id,
@@ -644,11 +646,11 @@ fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
     dbg!(vc);
     dbg!(&eb.duplicated);
     let vertex_count = vc + 1 - eb.duplicated.len();
+    dbg!(&tv);
     for t in tv.iter_mut() {
         for v in t.iter_mut() {
-            dbg!(&v);
-            if *v >= vertex_count {
-                *v = eb.duplicated[*v - vertex_count].id();
+            if *v > vertex_count {
+                *v = eb.duplicated[*v - vertex_count - 1].id();
             }
         }
     }
