@@ -19,7 +19,6 @@ use std::fmt::Debug;
 pub struct EdgeBreaker {
     history: Vec<Op>,
     previous: Vec<Id>,
-    duplicated: Vec<Id>,
     lengths: Vec<usize>,
 }
 
@@ -31,7 +30,7 @@ pub struct EdgeBreaker {
 struct HalfEdges {
     vertex_count: usize,
     triangle_count: usize,
-    duplicated: Vec<Id>,
+    conflicts: HashMap<(usize, usize), usize>,
     s: Vec<Id>,
     e: Vec<Id>,
     n: Vec<Id>,
@@ -43,7 +42,7 @@ impl HalfEdges {
     fn init(obj: &Obj) -> Self {
         let capacity = obj.faces.len() * 3;
         let vertex_count = obj.vertices.len();
-        let mut dup_vertices = Vec::new();
+        let mut conflicts: HashMap<(usize, usize), usize> = HashMap::new();
         let mut s: Vec<Id> = vec![NULL; capacity];
         let mut e: Vec<Id> = vec![NULL; capacity];
         let mut n: Vec<Id> = vec![NULL; capacity];
@@ -53,37 +52,6 @@ impl HalfEdges {
         let mut edge_map: HashMap<(usize, usize), Id> = HashMap::new();
         for (t, face) in obj.faces.iter().enumerate() {
             let offset = t * 3;
-
-            let mut face = face.clone();
-
-            // Duplicate to fix non-manifolds
-            for i in 0..3 {
-                let h = Id::from_offset(i + offset);
-                let a = face[i];
-                let b = face[(i + 1) % 3];
-                if let Some(&g) = edge_map.get(&(b, a)) {
-                    // Fix next and previous for triangles
-                    let gN = n[g];
-                    let gP = p[g];
-                    let hN = n[h];
-                    let hP = p[h];
-
-                    if gN == NULL || gP == NULL || hN == NULL || hP == NULL {
-                        // non-manifold edge: colided edge is already internal
-                        // Detach by duplicating vertices
-                        dup_vertices.push(Id::new(a));
-                        face[i] = dup_vertices.len() + vertex_count;
-                        dup_vertices.push(Id::new(b));
-                        face[(i + 1) % 3] = dup_vertices.len() + vertex_count;
-                    }
-                } else if let Some(_) = edge_map.get(&(a, b)) {
-                    // non-orientable edge: duplicate vertices
-                    dup_vertices.push(Id::new(a));
-                    face[i] = dup_vertices.len() + vertex_count;
-                    dup_vertices.push(Id::new(b));
-                    face[(i + 1) % 3] = dup_vertices.len() + vertex_count;
-                }
-            }
 
             // Construct half-edges from triangle
             for i in 0..3 {
@@ -98,19 +66,24 @@ impl HalfEdges {
             // Check for collisions and fix boundary
             for i in 0..3 {
                 let h = Id::from_offset(i + offset);
-                let a = s[h].offset();
-                let b = e[h].offset();
+                let a = s[h];
+                let b = e[h];
 
-                if let Some(&g) = edge_map.get(&(b, a)) {
+                if let Some(&g) = edge_map.get(&(b.id(), a.id())) {
                     // Fix next and previous for triangles
                     let gN = n[g];
                     let gP = p[g];
                     let hN = n[h];
                     let hP = p[h];
 
-                    if gN == NULL || gP == NULL || hN == NULL || hP == NULL {
+                    if gN == NULL || gP == NULL {
                         // non-manifold edge.
-                        edge_map.insert((a, b), h);
+                        let edge = ((a.id()), b.id());
+                        let conflict_count = match conflicts.get(&edge) {
+                            Some(c) => *c,
+                            None => 0,
+                        };
+                        conflicts.insert(edge, conflict_count + 1);
                     } else {
                         // First collision: make half edges internal
 
@@ -130,19 +103,23 @@ impl HalfEdges {
                         o[h] = g;
                         o[g] = h;
                     }
-                } else if let Some(_) = edge_map.get(&(a, b)) {
-                    // non-orientable edge
-                    edge_map.insert((a, b), h);
+                } else if let Some(_) = edge_map.get(&(a.id(), b.id())) {
+                    let edge = ((a.id()), b.id());
+                    let conflict_count = match conflicts.get(&edge) {
+                        Some(c) => *c,
+                        None => 0,
+                    };
+                    conflicts.insert(edge, conflict_count + 1);
                 } else {
-                    edge_map.insert((a, b), h);
+                    edge_map.insert((a.id(), b.id()), h);
                 }
             }
         }
 
         Self {
-            vertex_count: vertex_count + dup_vertices.len(),
+            vertex_count: vertex_count,
             triangle_count: obj.faces.len(),
-            duplicated: dup_vertices,
+            conflicts,
             s,
             e,
             n,
@@ -189,20 +166,18 @@ enum Mark {
 
 pub fn compress_obj(obj: &Obj) -> EdgeBreaker {
     let mut he = HalfEdges::init(obj);
-    debug!("he: {:?}", he);
     let eb = compress(&mut he);
     debug!("History: {:?}", eb.history);
+    debug!("Previous: {:?}", eb.previous);
     eb
 }
 
 pub fn decompress_obj(eb: &EdgeBreaker, vertices: Vec<[f32; 3]>) -> Obj {
     let faces = decompress(eb);
     debug!("Faces: {:?}", faces);
+    debug!("Faces len: {:?}", faces.len());
 
-    Obj {
-        faces,
-        vertices: eb.previous.iter().map(|&x| vertices[x]).collect(),
-    }
+    Obj { faces, vertices }
 }
 
 // .--------------------------------------------------------------------------.
@@ -215,6 +190,7 @@ fn compress(he: &mut HalfEdges) -> EdgeBreaker {
     let mut previous = Vec::new();
     let mut lengths = Vec::new();
     let mut stack = Vec::new();
+    let mut duplicated = Vec::new();
 
     let mut vm = vec![Mark::Unmarked; he.vertex_count];
     let mut hm = vec![Mark::Unmarked; he.triangle_count * 3];
@@ -225,8 +201,6 @@ fn compress(he: &mut HalfEdges) -> EdgeBreaker {
         None => Id::new(1),
     };
 
-    debug!("gate: {:?} ({:?}, {:?})", gate, he.s[gate], he.e[gate]);
-
     fn markEdges(
         mark: Mark,
         gate: Id,
@@ -234,11 +208,51 @@ fn compress(he: &mut HalfEdges) -> EdgeBreaker {
         previous: &mut Vec<Id>,
         vm: &mut Vec<Mark>,
         hm: &mut Vec<Mark>,
+        duplicated: &mut Vec<Id>,
     ) {
         let mut g = gate;
         loop {
-            let ev = he.e[g];
-            debug!("boundary: {:?}", ev);
+            let mut sv = he.s[g];
+            let mut ev = he.e[g];
+
+            // Fix conflicts
+            let edge = (sv.id(), ev.id());
+            if let Some(&c) = he.conflicts.get(&edge) {
+                if c != 0 {
+                    // Assign new IDs
+                    vm.push(vm[sv]);
+                    vm.push(vm[ev]);
+
+                    duplicated.push(sv);
+                    sv = Id::new(he.vertex_count + duplicated.len());
+                    duplicated.push(ev);
+                    ev = Id::new(he.vertex_count + duplicated.len());
+
+                    // Walk around vertices and assign new ones
+                    he.s[g] = sv;
+                    he.e[g] = ev;
+
+                    let mut b = he.p[g];
+                    while b != NULL {
+                        he.e[b] = sv;
+                        b = HalfEdges::n(b);
+                        he.s[b] = sv;
+                        b = he.o[b];
+                    }
+
+                    b = g;
+                    while b != NULL {
+                        he.e[b] = ev;
+                        b = HalfEdges::n(b);
+                        he.s[b] = ev;
+                        b = he.o[b];
+                    }
+
+                    he.conflicts.insert(edge, c - 1);
+                }
+            }
+
+            // Mark as boundary
             previous.push(ev);
             vm[ev] = mark;
             hm[g] = mark;
@@ -250,7 +264,15 @@ fn compress(he: &mut HalfEdges) -> EdgeBreaker {
     }
 
     // Mark first boundary
-    markEdges(Mark::External1, gate, he, &mut previous, &mut vm, &mut hm);
+    markEdges(
+        Mark::External1,
+        gate,
+        he,
+        &mut previous,
+        &mut vm,
+        &mut hm,
+        &mut duplicated,
+    );
 
     if he.n[gate] == NULL {
         // Triangulation has no edges. Make one
@@ -275,6 +297,7 @@ fn compress(he: &mut HalfEdges) -> EdgeBreaker {
                 &mut previous,
                 &mut vm,
                 &mut hm,
+                &mut duplicated,
             );
         }
     }
@@ -472,11 +495,16 @@ fn compress(he: &mut HalfEdges) -> EdgeBreaker {
         }
     }
 
+    for v in previous.iter_mut() {
+        if v.id() > he.vertex_count {
+            *v = duplicated[v.id() - he.vertex_count - 1];
+        }
+    }
+
     EdgeBreaker {
         history,
         previous,
         lengths,
-        duplicated: he.duplicated.clone(),
     }
 }
 
@@ -667,15 +695,9 @@ fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
 
     // '----------------------------------------
 
-    dbg!(vc);
-    dbg!(&eb.duplicated);
-    let vertex_count = vc + 1 - eb.duplicated.len();
-    dbg!(&tv);
     for t in tv.iter_mut() {
         for v in t.iter_mut() {
-            if *v > vertex_count {
-                *v = eb.duplicated[*v - vertex_count - 1].id();
-            }
+            *v = eb.previous[*v - 1].id();
         }
     }
     tv
