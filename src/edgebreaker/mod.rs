@@ -158,6 +158,7 @@ enum Mark {
     Unmarked,
     External1,
     External2,
+    External3,
 }
 
 // .--------------------------------------------------------------------------.
@@ -190,7 +191,9 @@ fn compress(he: &mut HalfEdges) -> EdgeBreaker {
     let mut history = Vec::new();
     let mut previous = Vec::new();
     let mut lengths = Vec::new();
+    // let mut m_table = Vec::new();
     let mut stack = Vec::new();
+    // let mut s_stack = Vec::new();
     let mut duplicated = Vec::new();
 
     let mut vm = vec![Mark::Unmarked; he.vertex_count];
@@ -341,6 +344,15 @@ fn compress(he: &mut HalfEdges) -> EdgeBreaker {
                 stack.push(gno);
             }
 
+            Mark::External3 => {
+                // TODO: implement M'
+                // Case M'
+
+                // history.push(Op::H);
+                // let p = stack.len();
+                // let o =
+            }
+
             Mark::External2 => {
                 // Case M
                 history.push(Op::H);
@@ -478,6 +490,7 @@ fn compress(he: &mut HalfEdges) -> EdgeBreaker {
                         he.p[gpo] = gP;
 
                         // Link 2
+                        debug!("b, bN: {:?}, {:?}", b, he.n[b]);
                         let bN = he.n[b];
                         he.n[gpo] = bN;
                         he.p[bN] = gpo;
@@ -490,6 +503,18 @@ fn compress(he: &mut HalfEdges) -> EdgeBreaker {
                         he.n[gno] = gN;
                         he.p[gN] = gno;
 
+                        // // Mark left loop with External3
+                        // let mut b = gpo;
+                        // loop {
+                        //     hm[b] = Mark::External3;
+                        //     vm[he.e[b]] = Mark::External3;
+                        //     b = he.n[b];
+                        //     if he.e[b] == he.e[gpo] {
+                        //         break;
+                        //     }
+                        // }
+
+                        // s_stack.push(history.len() - 1);
                         stack.push(gpo);
                         stack.push(gno);
                     }
