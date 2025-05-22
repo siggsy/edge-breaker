@@ -1,6 +1,9 @@
 use std::fmt::Debug;
-use std::hash::Hash;
 use std::ops::{Index, IndexMut};
+
+// ,---------------------------------------------------------------------------
+// | Op: history commands
+// '---------------------------------------------------------------------------
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Op {
@@ -12,22 +15,14 @@ pub enum Op {
     S,
 }
 
-// .--------------------------------------------------------------------------.
-// | Constants                                                                |
-// '--------------------------------------------------------------------------'
-
 pub const NULL: Id = Id(0);
 
-// .--------------------------------------------------------------------------.
-// | Definition                                                               |
-// '--------------------------------------------------------------------------'
+// ,---------------------------------------------------------------------------
+// | Id: dealing with offsets and vertex ids
+// '---------------------------------------------------------------------------
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct Id(usize);
-
-// .--------------------------------------------------------------------------.
-// | Implementations                                                          |
-// '--------------------------------------------------------------------------'
 
 impl Id {
     pub fn from_offset(off: usize) -> Id {
@@ -67,43 +62,5 @@ impl<T> Index<Id> for Vec<T> {
 impl<T> IndexMut<Id> for Vec<T> {
     fn index_mut(&mut self, index: Id) -> &mut Self::Output {
         self.index_mut(index.0 - 1)
-    }
-}
-
-// .--------------------------------------------------------------------------.
-// | Definition                                                               |
-// '--------------------------------------------------------------------------'
-
-#[derive(Eq)]
-pub struct Edge {
-    a: usize,
-    b: usize,
-}
-
-// .--------------------------------------------------------------------------.
-// | Implementations                                                          |
-// '--------------------------------------------------------------------------'
-
-impl Edge {
-    pub fn new(a: usize, b: usize) -> Edge {
-        Edge { a, b }
-    }
-}
-
-impl PartialEq for Edge {
-    fn eq(&self, other: &Self) -> bool {
-        self.a == other.a && self.b == other.b || self.a == other.b && self.b == other.a
-    }
-}
-
-impl Hash for Edge {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        if self.a < self.b {
-            self.a.hash(state);
-            self.b.hash(state);
-        } else {
-            self.b.hash(state);
-            self.a.hash(state);
-        }
     }
 }
