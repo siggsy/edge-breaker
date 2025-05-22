@@ -1,3 +1,5 @@
+use log::debug;
+
 use crate::edgebreaker::common::{Id, NULL, Op};
 
 use super::EdgeBreaker;
@@ -12,6 +14,9 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
     let mut offsets: Vec<usize> = vec![0; eb.history.iter().filter(|&o| *o == Op::S).count()];
     let mut edge_count = 0;
     let mut li = 0;
+    let mut mi = 0;
+
+    dbg!(&eb.m_table);
 
     // .----------------------------------------
     // | Preprocessing phase
@@ -61,8 +66,23 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
                 li += 1;
             }
             Op::M => {
+                let (p, o, l) = eb.m_table[mi];
+                mi += 1;
+
                 e -= 1;
                 edge_count += 1;
+                if d <= 0 {
+                    break;
+                }
+                let (_, _s) = stack.remove(p);
+
+                dbg!(e);
+                dbg!(o);
+                dbg!(l);
+                offsets[_s] = (-e - l as i32 - 1)
+                    .try_into()
+                    .expect("Encountered negative S offset!");
+                d -= 1;
             }
         }
     }
@@ -86,6 +106,7 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
     let mut ec: usize = 0;
     s = 0;
     li = 0;
+    mi = 0;
 
     // Create bounding loop
     let mut end = vec![NULL; edge_count];
@@ -101,7 +122,7 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
 
     let mut g = Id::new(1);
     let mut stack: Vec<Id> = vec![g];
-    let mut mi: usize = 0;
+
     for op in eb.history.iter() {
         match op {
             Op::C => {
@@ -148,8 +169,10 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
             Op::S => {
                 let gp = prev[g];
                 let mut d = next[g];
+                dbg!(&offsets);
                 for _ in 0..offsets[s] {
                     d = next[d];
+                    debug!("d: {:?}", end[d]);
                 }
                 s += 1;
 
@@ -162,6 +185,7 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
                 prev[a] = gp;
 
                 stack.push(a);
+                debug!("a: {:?}", a);
                 let dn = next[d];
                 next[a] = dn;
                 prev[dn] = a;
@@ -197,11 +221,13 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
 
             Op::M => {
                 let gp = prev[g];
-                let (p, o) = eb.m_table[mi];
+                let (p, o, _) = eb.m_table[mi];
                 mi += 1;
 
-                let mut d = stack[p];
+                let mut d = stack[p + 1];
+                debug!("stack: {:?}", stack);
                 for _ in 0..o {
+                    debug!("d: {:?}", end[d]);
                     d = next[d];
                 }
                 let dn = next[d];
@@ -210,19 +236,26 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
 
                 ec += 1;
                 let a = Id::new(ec);
+                debug!("g: {:?}", end[g]);
+                debug!("gp: {:?}", end[gp]);
+                end[a] = end[d];
                 next[gp] = a;
                 prev[a] = gp;
                 next[a] = dn;
                 prev[dn] = a;
                 next[d] = g;
                 prev[g] = d;
+
+                g = stack.pop().expect("uh oh..");
             }
         }
+        debug!("after: {:?}", op);
+        debug!("last: {:?}", tv.last());
     }
 
     // '----------------------------------------
 
-    dbg!(&tv);
+    debug!("tv: {:?}", &tv);
     for t in tv.iter_mut() {
         for v in t.iter_mut() {
             *v = eb.previous[*v - 1].id();

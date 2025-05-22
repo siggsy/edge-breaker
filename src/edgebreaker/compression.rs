@@ -283,6 +283,7 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
         debug!("trace: {:?}", (he.s[g], he.e[g]));
         match vm[he.v(g)] {
             Mark::Unmarked => {
+                debug!("Case C");
                 // Case C
                 history.push(Op::C);
                 previous.push(he.v(g));
@@ -316,21 +317,25 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
 
             Mark::External3(split_g) => {
                 // Case M'
+                debug!("Case M'");
 
                 // Mark with External1
                 let mut b = split_g;
+                let mut l = 0;
                 loop {
                     hm[b] = Mark::External1;
                     vm[he.e[b]] = Mark::External1;
                     debug!("b: {:?}, {:?}", he.s[b], he.e[b]);
                     b = he.n[b];
+                    l += 1;
                     if he.e[b] == he.e[split_g] {
                         break;
                     }
                 }
+                dbg!(l);
 
                 // Check if this is a self merge
-                if split_g == g {
+                if he.e[split_g] == he.e[g] {
                     stack.push(g);
                     continue;
                 }
@@ -348,20 +353,14 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
                         break;
                     }
                 }
-                debug!("o: {:?}", o);
 
                 // Find split_g in stack
-                debug!("split_g: {:?}, {:?}", he.s[split_g], he.e[split_g]);
-                debug!("g: {:?}, {:?}", he.s[g], he.e[g]);
-                debug!("stack: {:?}", stack);
-                debug!("history: {:?}", history);
-                debug!("duplicated: {:?}", duplicated);
                 let Some(p) = stack.iter().position(|&_g| split_g == _g) else {
                     panic!("Invalid stack structure. Did not find split_g in stack!");
                 };
 
                 history.push(Op::M);
-                m_table.push((p, o));
+                m_table.push((p, o, l));
 
                 let gp = HalfEdges::p(g);
                 let gn = HalfEdges::n(g);
@@ -369,11 +368,6 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
                 let gno = he.o[gn];
                 let gP = he.p[g];
                 let gN = he.n[g];
-
-                dbg!((he.s[gp], he.e[gp]));
-                dbg!((he.s[gn], he.e[gn]));
-                dbg!((he.s[gpo], he.e[gpo]));
-                dbg!((he.s[gno], he.e[gno]));
 
                 // Fix links and marks
                 hm[g] = Mark::Unmarked;
@@ -403,6 +397,7 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
             Mark::External2 => {
                 // Case M
                 history.push(Op::H);
+                debug!("Case M");
 
                 let gpo = he.o[HalfEdges::p(g)];
                 let gno = he.o[HalfEdges::n(g)];
@@ -457,6 +452,7 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
                 if HalfEdges::p(g) == he.p[g] {
                     if HalfEdges::n(g) == he.n[g] {
                         // Case E
+                        debug!("Case E");
                         history.push(Op::E);
 
                         let gn = HalfEdges::n(g);
@@ -466,6 +462,7 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
                         hm[gp] = Mark::Unmarked;
                     } else {
                         // Case L
+                        debug!("Case L");
                         history.push(Op::L);
 
                         let gP = he.p[g];
@@ -491,6 +488,7 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
                 } else {
                     if HalfEdges::n(g) == he.n[g] {
                         // Case R
+                        debug!("Case R");
                         history.push(Op::R);
 
                         let gN = he.n[g];
@@ -514,6 +512,7 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
                         stack.push(gpo);
                     } else {
                         // Case S
+                        debug!("Case S");
                         history.push(Op::S);
 
                         let gno = he.o[HalfEdges::n(g)];
@@ -551,7 +550,9 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
 
                         // // Mark left loop with External3
                         let mut b = gpo;
+                        debug!("marking 3");
                         loop {
+                            debug!("b: {:?}", (he.s[b], he.e[b]));
                             hm[b] = Mark::External3(gpo);
                             vm[he.e[b]] = Mark::External3(gpo);
                             b = he.n[b];
