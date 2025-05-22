@@ -281,6 +281,20 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
     stack.push(gate);
     while let Some(g) = stack.pop() {
         debug!("trace: {:?}", (he.s[g], he.e[g]));
+        if let Mark::External3(_g) = hm[g] {
+            debug!("cleanup");
+            // Mark with External1
+            let mut b = g;
+            loop {
+                hm[b] = Mark::External1;
+                vm[he.e[b]] = Mark::External1;
+                b = he.n[b];
+                if he.e[b] == he.e[g] {
+                    break;
+                }
+            }
+        }
+
         match vm[he.v(g)] {
             Mark::Unmarked => {
                 debug!("Case C");
@@ -323,9 +337,15 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
                 let mut b = split_g;
                 let mut l = 0;
                 loop {
+                    if hm[b] != Mark::External3(split_g) {
+                        debug!("mark: {:?}", hm[b]);
+                        debug!("b: {:?}", (he.s[b], he.e[b]));
+                        // panic!("oh oh");
+                    }
+
                     hm[b] = Mark::External1;
                     vm[he.e[b]] = Mark::External1;
-                    debug!("b: {:?}, {:?}", he.s[b], he.e[b]);
+                    // debug!("b: {:?}, {:?}", he.s[b], he.e[b]);
                     b = he.n[b];
                     l += 1;
                     if he.e[b] == he.e[split_g] {
@@ -333,6 +353,7 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
                     }
                 }
                 dbg!(l);
+                dbg!(he.e[split_g] == he.v(g));
 
                 // Check if this is a self merge
                 if he.e[split_g] == he.e[g] {
@@ -552,7 +573,7 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
                         let mut b = gpo;
                         debug!("marking 3");
                         loop {
-                            debug!("b: {:?}", (he.s[b], he.e[b]));
+                            // debug!("b: {:?}", (he.s[b], he.e[b]));
                             hm[b] = Mark::External3(gpo);
                             vm[he.e[b]] = Mark::External3(gpo);
                             b = he.n[b];
@@ -563,6 +584,7 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
 
                         debug!("g: {:?}", (he.s[g], he.e[g]));
                         debug!("gpo: {:?}", (he.s[gpo], he.e[gpo]));
+                        debug!("hm[gpo]: {:?}", hm[gpo]);
 
                         // s_stack.push(history.len() - 1);
                         stack.push(gpo);
