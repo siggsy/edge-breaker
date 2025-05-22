@@ -60,7 +60,10 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
                 e -= l as i32 + 1;
                 li += 1;
             }
-            Op::M => {}
+            Op::M => {
+                e -= 1;
+                edge_count += 1;
+            }
         }
     }
 
@@ -69,6 +72,11 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
     // Sanity check
     assert!(t == eb.history.len());
     // assert!(c as i32 + e == eb.previous.len() as i32);
+    dbg!(d);
+    dbg!(c);
+    dbg!(e);
+    dbg!(s);
+    dbg!(edge_count);
 
     // .----------------------------------------
     // | Generation phase
