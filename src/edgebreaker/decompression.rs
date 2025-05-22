@@ -60,6 +60,7 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
                 e -= l as i32 + 1;
                 li += 1;
             }
+            Op::M => {}
         }
     }
 
@@ -92,6 +93,7 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
 
     let mut g = Id::new(1);
     let mut stack: Vec<Id> = vec![g];
+    let mut mi: usize = 0;
     for op in eb.history.iter() {
         match op {
             Op::C => {
@@ -184,11 +186,35 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
                 next[a] = g;
                 prev[g] = a;
             }
+
+            Op::M => {
+                let gp = prev[g];
+                let (p, o) = eb.m_table[mi];
+                mi += 1;
+
+                let mut d = stack[p];
+                for _ in 0..o {
+                    d = next[d];
+                }
+                let dn = next[d];
+
+                tv.push([end[gp].id(), end[g].id(), end[d].id()]);
+
+                ec += 1;
+                let a = Id::new(ec);
+                next[gp] = a;
+                prev[a] = gp;
+                next[a] = dn;
+                prev[dn] = a;
+                next[d] = g;
+                prev[g] = d;
+            }
         }
     }
 
     // '----------------------------------------
 
+    dbg!(&tv);
     for t in tv.iter_mut() {
         for v in t.iter_mut() {
             *v = eb.previous[*v - 1].id();

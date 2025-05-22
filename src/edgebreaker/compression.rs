@@ -144,7 +144,7 @@ enum Mark {
     Unmarked,
     External1,
     External2,
-    External3,
+    External3(Id),
 }
 
 // .--------------------------------------------------------------------------.
@@ -156,7 +156,7 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
     let mut history = Vec::new();
     let mut previous = Vec::new();
     let mut lengths = Vec::new();
-    // let mut m_table = Vec::new();
+    let mut m_table = Vec::new();
     let mut stack = Vec::new();
     // let mut s_stack = Vec::new();
     let mut duplicated = Vec::new();
@@ -164,11 +164,15 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
     let mut vm = vec![Mark::Unmarked; he.vertex_count];
     let mut hm = vec![Mark::Unmarked; he.triangle_count * 3];
 
+    debug!("conflicts: {:?}", he.conflicts);
+
     // Find the first gate
     let gate = match he.n.iter().position(|&x| x != NULL) {
         Some(i) => Id::from_offset(i),
         None => Id::new(1),
     };
+
+    debug!("gate: {:?}", (he.s[gate], he.e[gate]));
 
     fn markEdges(
         mark: Mark,
@@ -276,6 +280,7 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
     // Main algorithm loop
     stack.push(gate);
     while let Some(g) = stack.pop() {
+        debug!("trace: {:?}", (he.s[g], he.e[g]));
         match vm[he.v(g)] {
             Mark::Unmarked => {
                 // Case C
@@ -309,13 +314,90 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
                 stack.push(gno);
             }
 
-            Mark::External3 => {
-                // TODO: implement M'
+            Mark::External3(split_g) => {
                 // Case M'
 
-                // history.push(Op::H);
-                // let p = stack.len();
-                // let o =
+                // Mark with External1
+                let mut b = split_g;
+                loop {
+                    hm[b] = Mark::External1;
+                    vm[he.e[b]] = Mark::External1;
+                    debug!("b: {:?}, {:?}", he.s[b], he.e[b]);
+                    b = he.n[b];
+                    if he.e[b] == he.e[split_g] {
+                        break;
+                    }
+                }
+
+                // Check if this is a self merge
+                if split_g == g {
+                    stack.push(g);
+                    continue;
+                }
+
+                // Calculate offset
+                b = split_g;
+                let mut o = 0;
+                loop {
+                    if he.e[b] == he.v(g) {
+                        break;
+                    }
+                    o += 1;
+                    b = he.n[b];
+                    if he.e[b] == he.e[split_g] {
+                        break;
+                    }
+                }
+                debug!("o: {:?}", o);
+
+                // Find split_g in stack
+                debug!("split_g: {:?}, {:?}", he.s[split_g], he.e[split_g]);
+                debug!("g: {:?}, {:?}", he.s[g], he.e[g]);
+                debug!("stack: {:?}", stack);
+                debug!("history: {:?}", history);
+                debug!("duplicated: {:?}", duplicated);
+                let Some(p) = stack.iter().position(|&_g| split_g == _g) else {
+                    panic!("Invalid stack structure. Did not find split_g in stack!");
+                };
+
+                history.push(Op::M);
+                m_table.push((p, o));
+
+                let gp = HalfEdges::p(g);
+                let gn = HalfEdges::n(g);
+                let gpo = he.o[gp];
+                let gno = he.o[gn];
+                let gP = he.p[g];
+                let gN = he.n[g];
+
+                dbg!((he.s[gp], he.e[gp]));
+                dbg!((he.s[gn], he.e[gn]));
+                dbg!((he.s[gpo], he.e[gpo]));
+                dbg!((he.s[gno], he.e[gno]));
+
+                // Fix links and marks
+                hm[g] = Mark::Unmarked;
+                hm[gp] = Mark::Unmarked;
+                hm[gn] = Mark::Unmarked;
+                hm[gpo] = Mark::External1;
+                hm[gno] = Mark::External1;
+
+                // Link 1
+                he.n[gP] = gpo;
+                he.p[gpo] = gP;
+
+                // Link 2
+                let bN = he.n[b];
+                he.n[gpo] = bN;
+                he.p[bN] = gpo;
+
+                // Link 3
+                he.n[b] = gno;
+                he.p[gno] = b;
+
+                // Link 4
+                he.n[gno] = gN;
+                he.p[gN] = gno;
             }
 
             Mark::External2 => {
@@ -455,7 +537,6 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
                         he.p[gpo] = gP;
 
                         // Link 2
-                        debug!("b, bN: {:?}, {:?}", b, he.n[b]);
                         let bN = he.n[b];
                         he.n[gpo] = bN;
                         he.p[bN] = gpo;
@@ -469,15 +550,18 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
                         he.p[gN] = gno;
 
                         // // Mark left loop with External3
-                        // let mut b = gpo;
-                        // loop {
-                        //     hm[b] = Mark::External3;
-                        //     vm[he.e[b]] = Mark::External3;
-                        //     b = he.n[b];
-                        //     if he.e[b] == he.e[gpo] {
-                        //         break;
-                        //     }
-                        // }
+                        let mut b = gpo;
+                        loop {
+                            hm[b] = Mark::External3(gpo);
+                            vm[he.e[b]] = Mark::External3(gpo);
+                            b = he.n[b];
+                            if he.e[b] == he.e[gpo] {
+                                break;
+                            }
+                        }
+
+                        debug!("g: {:?}", (he.s[g], he.e[g]));
+                        debug!("gpo: {:?}", (he.s[gpo], he.e[gpo]));
 
                         // s_stack.push(history.len() - 1);
                         stack.push(gpo);
@@ -498,5 +582,6 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
         history,
         previous,
         lengths,
+        m_table,
     }
 }

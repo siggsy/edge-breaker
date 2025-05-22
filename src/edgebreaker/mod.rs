@@ -20,6 +20,7 @@ pub struct EdgeBreaker {
     history: Vec<Op>,
     previous: Vec<Id>,
     lengths: Vec<usize>,
+    m_table: Vec<(usize, usize)>,
 }
 
 // .--------------------------------------------------------------------------.

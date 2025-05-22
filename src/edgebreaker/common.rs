@@ -13,6 +13,7 @@ pub enum Op {
     E,
     R,
     S,
+    M,
 }
 
 pub const NULL: Id = Id(0);
