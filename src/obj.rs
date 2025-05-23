@@ -48,17 +48,16 @@ impl Obj {
                         .filter(|x| !x.is_empty())
                         .map(parse_index)
                         .collect::<Vec<_>>();
+
                     let n = vals.len();
-                    match n {
-                        3 => faces.push(vals.try_into().unwrap()),
-                        4 => {
-                            faces.push([vals[0], vals[1], vals[2]]);
-                            faces.push([vals[0], vals[2], vals[3]]);
-                        }
-                        _ => {
-                            warn!("Unsupported face size: {n}. Skipping ...");
-                        }
-                    };
+                    if n == 3 {
+                        faces.push(vals.try_into().unwrap());
+                        continue;
+                    }
+
+                    for i in 1..=n - 2 {
+                        faces.push([vals[0], vals[i], vals[i + 1]]);
+                    }
                 }
                 Some('#') => continue,
                 _ => warn!("Failed to parse line {i}: {line}"),
