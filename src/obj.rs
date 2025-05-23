@@ -3,7 +3,7 @@ use log::warn;
 use std::{
     fmt::Debug,
     fs::File,
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, LineWriter, Write},
 };
 
 #[derive(Debug)]
@@ -30,7 +30,7 @@ impl Obj {
             .unwrap()
     }
 
-    pub fn read(reader: &mut BufReader<File>) -> Obj {
+    pub fn read(reader: &mut BufReader<File>) -> Self {
         let mut vertices = Vec::new();
         let mut faces = Vec::new();
 
@@ -50,5 +50,15 @@ impl Obj {
         }
 
         Obj { vertices, faces }
+    }
+
+    pub fn write(&self, file: &File) {
+        let mut writer = LineWriter::new(file);
+        for v in &self.vertices {
+            let _ = writer.write_all(&format!("v {} {} {}\n", v[0], v[1], v[2]).into_bytes());
+        }
+        for f in &self.faces {
+            let _ = writer.write_all(&format!("f {} {} {}\n", f[0], f[1], f[2]).into_bytes());
+        }
     }
 }

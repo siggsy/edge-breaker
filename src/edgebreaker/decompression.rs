@@ -74,8 +74,9 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
                 if d <= 0 {
                     break;
                 }
-                let (_, _s) = stack.remove(p);
+                let (_e, _s) = stack.remove(p);
 
+                dbg!(_e);
                 dbg!(e);
                 dbg!(o);
                 dbg!(l);
@@ -169,10 +170,8 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
             Op::S => {
                 let gp = prev[g];
                 let mut d = next[g];
-                dbg!(&offsets);
                 for _ in 0..offsets[s] {
                     d = next[d];
-                    debug!("d: {:?}", end[d]);
                 }
                 s += 1;
 
@@ -185,7 +184,6 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
                 prev[a] = gp;
 
                 stack.push(a);
-                debug!("a: {:?}", a);
                 let dn = next[d];
                 next[a] = dn;
                 prev[dn] = a;
@@ -225,9 +223,7 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
                 mi += 1;
 
                 let mut d = stack[p + 1];
-                debug!("stack: {:?}", stack);
                 for _ in 0..o {
-                    debug!("d: {:?}", end[d]);
                     d = next[d];
                 }
                 let dn = next[d];
@@ -236,8 +232,6 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
 
                 ec += 1;
                 let a = Id::new(ec);
-                debug!("g: {:?}", end[g]);
-                debug!("gp: {:?}", end[gp]);
                 end[a] = end[d];
                 next[gp] = a;
                 prev[a] = gp;
@@ -250,7 +244,10 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
             }
         }
         debug!("after: {:?}", op);
-        debug!("last: {:?}", tv.last());
+        debug!(
+            "last: {:?}",
+            tv.last().expect("test").map(|v| eb.previous[v - 1].id())
+        );
     }
 
     // '----------------------------------------
