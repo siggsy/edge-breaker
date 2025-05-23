@@ -13,26 +13,14 @@ pub struct Obj {
 }
 
 impl Obj {
-    #[inline(always)]
-    fn parse_index(word: &str) -> usize {
-        word.split('/').nth(0).unwrap().parse().unwrap()
-    }
-
-    #[inline(always)]
-    fn values<T: Debug, const N: usize>(line: &str, conv: fn(&str) -> T) -> [T; N] {
-        line.split(' ')
-            .skip(1)
-            .filter(|x| !x.is_empty())
-            .take(N)
-            .map(conv)
-            .collect::<Vec<T>>()
-            .try_into()
-            .unwrap()
-    }
-
     pub fn read(reader: &mut BufReader<File>) -> Self {
         let mut vertices = Vec::new();
         let mut faces = Vec::new();
+
+        #[inline(always)]
+        fn parse_index(word: &str) -> usize {
+            word.split('/').nth(0).unwrap().parse().unwrap()
+        }
 
         for (i, line) in reader.lines().map_while(Result::ok).enumerate() {
             let mut chars = line.chars();
@@ -40,10 +28,38 @@ impl Obj {
 
             match c {
                 Some('v') => match chars.next() {
-                    Some(' ') => vertices.push(Obj::values(&line, |w| w.parse().unwrap())),
+                    Some(' ') => {
+                        let vals = line
+                            .split(' ')
+                            .skip(1)
+                            .filter(|x| !x.is_empty())
+                            .map(|w| w.parse().unwrap())
+                            .collect::<Vec<_>>()
+                            .try_into()
+                            .unwrap();
+                        vertices.push(vals);
+                    }
                     _ => continue,
                 },
-                Some('f') => faces.push(Obj::values(&line, Obj::parse_index)),
+                Some('f') => {
+                    let vals = line
+                        .split(' ')
+                        .skip(1)
+                        .filter(|x| !x.is_empty())
+                        .map(parse_index)
+                        .collect::<Vec<_>>();
+                    let n = vals.len();
+                    match n {
+                        3 => faces.push(vals.try_into().unwrap()),
+                        4 => {
+                            faces.push([vals[0], vals[1], vals[2]]);
+                            faces.push([vals[0], vals[2], vals[3]]);
+                        }
+                        _ => {
+                            warn!("Unsupported face size: {n}. Skipping ...");
+                        }
+                    };
+                }
                 Some('#') => continue,
                 _ => warn!("Failed to parse line {i}: {line}"),
             }
