@@ -133,6 +133,10 @@ impl HalfEdges {
         let t = offset - i;
         Id::from_offset((i + 2) % 3 + t)
     }
+
+    fn print_edge(&self, id: Id) -> String {
+        format!("{:?}", (self.s[id], self.e[id]))
+    }
 }
 
 // .--------------------------------------------------------------------------.
@@ -172,7 +176,7 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
         None => Id::new(1),
     };
 
-    debug!("gate: {:?}", (he.s[gate], he.e[gate]));
+    debug!("gate: {}", he.print_edge(gate));
 
     fn markEdges(
         mark: Mark,
@@ -282,10 +286,15 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
     while let Some(g) = stack.pop() {
         debug!("trace: {:?}", (he.s[g], he.e[g]));
         if let Mark::External3(_g) = hm[g] {
-            debug!("cleanup");
+            debug!("cleanup: {:?}", g);
             // Mark with External1
             let mut b = g;
             loop {
+                if hm[b] != Mark::External3(g) {
+                    debug!("mark: {:?}", hm[b]);
+                    debug!("b: {:?}", (he.s[b], he.e[b]));
+                    // panic!("oh oh");
+                }
                 hm[b] = Mark::External1;
                 vm[he.e[b]] = Mark::External1;
                 b = he.n[b];
@@ -329,92 +338,7 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
                 stack.push(gno);
             }
 
-            Mark::External3(split_g) => {
-                // Case M'
-                debug!("Case M'");
-
-                // Mark with External1
-                let mut b = split_g;
-                let mut l = 0;
-                loop {
-                    if hm[b] != Mark::External3(split_g) {
-                        debug!("mark: {:?}", hm[b]);
-                        debug!("b: {:?}", (he.s[b], he.e[b]));
-                        // panic!("oh oh");
-                    }
-
-                    hm[b] = Mark::External1;
-                    vm[he.e[b]] = Mark::External1;
-                    // debug!("b: {:?}, {:?}", he.s[b], he.e[b]);
-                    b = he.n[b];
-                    l += 1;
-                    if he.e[b] == he.e[split_g] {
-                        break;
-                    }
-                }
-                dbg!(l);
-                dbg!(he.e[split_g] == he.v(g));
-
-                // Check if this is a self merge
-                if he.e[split_g] == he.e[g] {
-                    stack.push(g);
-                    continue;
-                }
-
-                // Calculate offset
-                b = split_g;
-                let mut o = 0;
-                loop {
-                    if he.e[b] == he.v(g) {
-                        break;
-                    }
-                    o += 1;
-                    b = he.n[b];
-                    if he.e[b] == he.e[split_g] {
-                        break;
-                    }
-                }
-
-                // Find split_g in stack
-                let Some(p) = stack.iter().position(|&_g| split_g == _g) else {
-                    panic!("Invalid stack structure. Did not find split_g in stack!");
-                };
-
-                history.push(Op::M);
-                m_table.push((p, o, l));
-
-                let gp = HalfEdges::p(g);
-                let gn = HalfEdges::n(g);
-                let gpo = he.o[gp];
-                let gno = he.o[gn];
-                let gP = he.p[g];
-                let gN = he.n[g];
-
-                // Fix links and marks
-                hm[g] = Mark::Unmarked;
-                hm[gp] = Mark::Unmarked;
-                hm[gn] = Mark::Unmarked;
-                hm[gpo] = Mark::External1;
-                hm[gno] = Mark::External1;
-
-                // Link 1
-                he.n[gP] = gpo;
-                he.p[gpo] = gP;
-
-                // Link 2
-                let bN = he.n[b];
-                he.n[gpo] = bN;
-                he.p[bN] = gpo;
-
-                // Link 3
-                he.n[b] = gno;
-                he.p[gno] = b;
-
-                // Link 4
-                he.n[gno] = gN;
-                he.p[gN] = gno;
-            }
-
+            // Mark::External3(split_g) => {}
             Mark::External2 => {
                 // Case M
                 history.push(Op::H);
@@ -469,7 +393,7 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
                 stack.push(gno);
             }
 
-            Mark::External1 => {
+            Mark::External1 | Mark::External3(_) => {
                 if HalfEdges::p(g) == he.p[g] {
                     if HalfEdges::n(g) == he.n[g] {
                         // Case E
@@ -532,67 +456,194 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
 
                         stack.push(gpo);
                     } else {
-                        // Case S
-                        debug!("Case S");
-                        history.push(Op::S);
+                        match vm[he.v(g)] {
+                            Mark::External3(split_g) => {
+                                // Case M'
+                                debug!("Case M'");
+                                debug!("split_g: {:?}", split_g);
 
-                        let gno = he.o[HalfEdges::n(g)];
-                        let gpo = he.o[HalfEdges::p(g)];
-                        let gN = he.n[g];
-                        let gP = he.p[g];
+                                // Mark with External1
+                                let mut b = split_g;
+                                let mut l = 0;
+                                loop {
+                                    if hm[b] != Mark::External3(split_g) {
+                                        debug!("mark: {:?}", hm[b]);
+                                        debug!("b: {:?}", (he.s[b], he.e[b]));
+                                        // panic!("oh oh");
+                                    }
 
-                        // Flags
-                        hm[g] = Mark::Unmarked;
-                        hm[gpo] = Mark::External1;
-                        hm[gno] = Mark::External1;
+                                    hm[b] = Mark::External1;
+                                    vm[he.e[b]] = Mark::External1;
+                                    // debug!("b: {:?}, {:?}", he.s[b], he.e[b]);
+                                    b = he.n[b];
+                                    l += 1;
+                                    if he.e[b] == he.e[split_g] {
+                                        break;
+                                    }
+                                }
+                                dbg!(l);
+                                dbg!(he.e[split_g] == he.v(g));
 
-                        // Find b by rotating around v
-                        let mut b = HalfEdges::n(g);
-                        while hm[b] == Mark::Unmarked {
-                            b = HalfEdges::p(he.o[b]);
-                        }
+                                // Check if this is a self merge
+                                if he.e[split_g] == he.e[g] {
+                                    stack.push(g);
+                                    continue;
+                                }
 
-                        // Link 1
-                        he.n[gP] = gpo;
-                        he.p[gpo] = gP;
+                                // Calculate offset
+                                b = split_g;
+                                let mut o = 0;
+                                loop {
+                                    if he.e[b] == he.v(g) {
+                                        break;
+                                    }
+                                    o += 1;
+                                    b = he.n[b];
+                                    if he.e[b] == he.e[split_g] {
+                                        break;
+                                    }
+                                }
 
-                        // Link 2
-                        let bN = he.n[b];
-                        he.n[gpo] = bN;
-                        he.p[bN] = gpo;
+                                // Find split_g in stack
+                                let Some(p) = stack.iter().position(|&_g| split_g == _g) else {
+                                    panic!(
+                                        "Invalid stack structure. Did not find split_g in stack!"
+                                    );
+                                };
 
-                        // Link 3
-                        he.n[b] = gno;
-                        he.p[gno] = b;
+                                history.push(Op::M);
+                                m_table.push((p, o, l));
 
-                        // Link 4
-                        he.n[gno] = gN;
-                        he.p[gN] = gno;
+                                let gp = HalfEdges::p(g);
+                                let gn = HalfEdges::n(g);
+                                let gpo = he.o[gp];
+                                let gno = he.o[gn];
+                                let gP = he.p[g];
+                                let gN = he.n[g];
 
-                        // // Mark left loop with External3
-                        let mut b = gpo;
-                        debug!("marking 3");
-                        loop {
-                            // debug!("b: {:?}", (he.s[b], he.e[b]));
-                            hm[b] = Mark::External3(gpo);
-                            vm[he.e[b]] = Mark::External3(gpo);
-                            b = he.n[b];
-                            if he.e[b] == he.e[gpo] {
-                                break;
+                                // Fix links and marks
+                                hm[g] = Mark::Unmarked;
+                                hm[gpo] = Mark::External1;
+                                hm[gno] = Mark::External1;
+
+                                // Link 1
+                                he.n[gP] = gpo;
+                                he.p[gpo] = gP;
+
+                                // Link 2
+                                let bN = he.n[b];
+                                he.n[gpo] = bN;
+                                he.p[bN] = gpo;
+
+                                // Link 3
+                                he.n[b] = gno;
+                                he.p[gno] = b;
+
+                                // Link 4
+                                he.n[gno] = gN;
+                                he.p[gN] = gno;
+                            }
+                            Mark::External1 => {
+                                // Case S
+                                debug!("Case S");
+                                history.push(Op::S);
+
+                                let gno = he.o[HalfEdges::n(g)];
+                                let gpo = he.o[HalfEdges::p(g)];
+                                let gN = he.n[g];
+                                let gP = he.p[g];
+
+                                // Flags
+                                hm[g] = Mark::Unmarked;
+                                hm[gpo] = Mark::External1;
+                                hm[gno] = Mark::External1;
+
+                                // Find b by rotating around v
+                                let mut b = HalfEdges::n(g);
+                                while hm[b] == Mark::Unmarked {
+                                    b = HalfEdges::p(he.o[b]);
+                                }
+
+                                debug!("g: {}", he.print_edge(g));
+                                debug!("gpo: {}", he.print_edge(gpo));
+                                debug!("gno: {}", he.print_edge(gno));
+                                debug!("gP: {}", he.print_edge(gP));
+                                debug!("gN: {}", he.print_edge(gN));
+                                debug!("b: {}", he.print_edge(b));
+                                debug!("hm[b]: {:?}", hm[b]);
+
+                                // Link 1
+                                he.n[gP] = gpo;
+                                he.p[gpo] = gP;
+
+                                // Link 2
+                                let bN = he.n[b];
+                                he.n[gpo] = bN;
+                                he.p[bN] = gpo;
+
+                                // Link 3
+                                he.n[b] = gno;
+                                he.p[gno] = b;
+
+                                // Link 4
+                                he.n[gno] = gN;
+                                he.p[gN] = gno;
+
+                                // // Mark left loop with External3
+                                let mut b = gpo;
+                                debug!("marking 3");
+                                let should_mark = loop {
+                                    match hm[b] {
+                                        Mark::External3(_) => {
+                                            break false;
+                                        }
+                                        _ => {}
+                                    }
+
+                                    match vm[he.e[b]] {
+                                        Mark::External3(_) => {
+                                            break false;
+                                        }
+                                        _ => {}
+                                    }
+
+                                    b = he.n[b];
+                                    if he.e[b] == he.e[gpo] {
+                                        break true;
+                                    }
+                                };
+
+                                if should_mark {
+                                    loop {
+                                        // debug!("b: {:?}", (he.s[b], he.e[b]));
+                                        debug!("overriding: {:?}", hm[b]);
+                                        debug!("vertex: {:?}", vm[he.e[b]]);
+                                        hm[b] = Mark::External3(gpo);
+                                        vm[he.e[b]] = Mark::External3(gpo);
+                                        b = he.n[b];
+                                        if he.e[b] == he.e[gpo] {
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                debug!("g: {:?}", (he.s[g], he.e[g]));
+                                debug!("gpo: {:?}", (he.s[gpo], he.e[gpo]));
+                                debug!("hm[gpo]: {:?}", hm[gpo]);
+
+                                // s_stack.push(history.len() - 1);
+                                stack.push(gpo);
+                                stack.push(gno);
+                            }
+                            _ => {
+                                panic!("cannot happen");
                             }
                         }
-
-                        debug!("g: {:?}", (he.s[g], he.e[g]));
-                        debug!("gpo: {:?}", (he.s[gpo], he.e[gpo]));
-                        debug!("hm[gpo]: {:?}", hm[gpo]);
-
-                        // s_stack.push(history.len() - 1);
-                        stack.push(gpo);
-                        stack.push(gno);
                     }
                 }
             }
         }
+        debug!("hist.len {}", history.len());
     }
 
     for v in previous.iter_mut() {
