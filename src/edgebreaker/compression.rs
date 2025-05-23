@@ -469,20 +469,16 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
                                     if hm[b] != Mark::External3(split_g) {
                                         debug!("mark: {:?}", hm[b]);
                                         debug!("b: {:?}", (he.s[b], he.e[b]));
-                                        // panic!("oh oh");
                                     }
 
                                     hm[b] = Mark::External1;
                                     vm[he.e[b]] = Mark::External1;
-                                    // debug!("b: {:?}, {:?}", he.s[b], he.e[b]);
                                     b = he.n[b];
                                     l += 1;
                                     if he.e[b] == he.e[split_g] {
                                         break;
                                     }
                                 }
-                                dbg!(l);
-                                dbg!(he.e[split_g] == he.v(g));
 
                                 // Check if this is a self merge
                                 if he.e[split_g] == he.e[g] {

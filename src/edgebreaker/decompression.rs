@@ -16,8 +16,6 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
     let mut li = 0;
     let mut mi = 0;
 
-    dbg!(&eb.m_table);
-
     // .----------------------------------------
     // | Preprocessing phase
 
@@ -76,10 +74,6 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
                 }
                 let (_e, _s) = stack.remove(p);
 
-                dbg!(_e);
-                dbg!(e);
-                dbg!(o);
-                dbg!(l);
                 offsets[_s] = (-e - l as i32 - 1)
                     .try_into()
                     .expect("Encountered negative S offset!");
@@ -92,12 +86,6 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
 
     // Sanity check
     assert!(t == eb.history.len());
-    // assert!(c as i32 + e == eb.previous.len() as i32);
-    dbg!(d);
-    dbg!(c);
-    dbg!(e);
-    dbg!(s);
-    dbg!(edge_count);
 
     // .----------------------------------------
     // | Generation phase

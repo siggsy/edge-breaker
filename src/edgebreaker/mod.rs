@@ -5,23 +5,10 @@ mod compression;
 mod decompression;
 
 use crate::obj::Obj;
-use common::{Id, Op};
+use common::EdgeBreaker;
 use compression::{HalfEdges, compress};
 use decompression::decompress;
 use log::debug;
-use std::fmt::Debug;
-
-// .--------------------------------------------------------------------------.
-// | Struct: EdgeBreaker                                                      |
-// '--------------------------------------------------------------------------'
-
-#[derive(Debug)]
-pub struct EdgeBreaker {
-    history: Vec<Op>,
-    previous: Vec<Id>,
-    lengths: Vec<usize>,
-    m_table: Vec<(usize, usize, usize)>,
-}
 
 // .--------------------------------------------------------------------------.
 // | Public functions                                                         |

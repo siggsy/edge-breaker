@@ -1,6 +1,18 @@
 use std::fmt::Debug;
 use std::ops::{Index, IndexMut};
 
+// .--------------------------------------------------------------------------.
+// | Struct: EdgeBreaker                                                      |
+// '--------------------------------------------------------------------------'
+
+#[derive(Debug)]
+pub struct EdgeBreaker {
+    pub history: Vec<Op>,
+    pub previous: Vec<Id>,
+    pub lengths: Vec<usize>,
+    pub m_table: Vec<(usize, usize, usize)>,
+}
+
 // ,---------------------------------------------------------------------------
 // | Op: history commands
 // '---------------------------------------------------------------------------
