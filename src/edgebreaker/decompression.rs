@@ -235,7 +235,7 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
                 mi += 1;
 
                 let mut d = stack[p];
-                for _ in 0..o + 1 {
+                for _ in 0..o {
                     d = next[d];
                 }
                 let dn = next[d];
