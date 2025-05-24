@@ -14,6 +14,9 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
     let mut stack: Vec<(i32, usize)> = Vec::new();
     let mut offsets: Vec<usize> = vec![0; eb.history.iter().filter(|&o| *o == Op::S).count()];
     let mut edge_count = 0;
+    let mut vertex_count = 0;
+    let mut h = 0;
+    let mut a = 0;
     let mut li = 0;
     let mut mi = 0;
 
@@ -32,31 +35,28 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
                 stack.push((e, s));
                 s += 1;
                 d += 1;
-                edge_count += 1;
+                a += 1;
             }
 
             Op::E => {
                 e += 3;
-                edge_count += 3;
                 if d <= 0 {
-                    end.resize(edge_count, NULL);
-                    next.resize(edge_count, NULL);
-                    prev.resize(edge_count, NULL);
-                    let (_, _edge_count, _e, _c) = components.last().unwrap_or(&(NULL, 0, 0, 0));
-                    let vc = e as usize;
+                    let new_edge_count = edge_count + a + e as usize;
+                    end.resize(new_edge_count, NULL);
+                    next.resize(new_edge_count, NULL);
+                    prev.resize(new_edge_count, NULL);
+                    let (_, _e) = components.last().unwrap_or(&(NULL, 0));
+                    let bc = e as usize;
 
-                    for v in 0..vc {
-                        next[v + _edge_count] = Id::from_offset(((v + 1) % vc) + _edge_count);
-                        prev[v + _edge_count] = Id::from_offset(((v + vc - 1) % vc) + _edge_count);
-                        end[v + _edge_count] = Id::from_offset(v + _e + _c);
+                    for b in 0..bc {
+                        next[b + edge_count] = Id::from_offset(((b + 1) % bc) + edge_count);
+                        prev[b + edge_count] = Id::from_offset(((b + bc - 1) % bc) + edge_count);
+                        end[b + edge_count] = Id::from_offset(b + vertex_count);
                     }
 
-                    components.push((
-                        Id::new(1 + _edge_count),
-                        edge_count,
-                        e as usize,
-                        _e + c + _c,
-                    ));
+                    components.push((Id::new(1 + edge_count), bc));
+                    edge_count = new_edge_count;
+                    vertex_count += bc + h + c;
                     debug!("components: {:?}", components.last());
                     debug!("next: {:?}", next);
                     debug!("end: {:?}", end);
@@ -75,30 +75,30 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
             Op::C => {
                 e -= 1;
                 c += 1;
-                edge_count += 1;
+                a += 1;
             }
 
             Op::R => {
                 e += 1;
-                edge_count += 2;
             }
 
             Op::L => {
                 e += 1;
-                edge_count += 2;
             }
 
             Op::H => {
                 let l = eb.lengths[li];
                 e -= l as i32 + 1;
+                h += l + 1;
                 li += 1;
+                a += l + 1;
             }
             Op::M => {
                 let (p, _, l) = eb.m_table[mi];
                 mi += 1;
 
                 e -= 1;
-                edge_count += 1;
+                a += 1;
                 let (_e, _s) = stack.remove(p);
 
                 offsets[_s] = (-_e - l as i32)
@@ -116,7 +116,7 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
 
     let mut tv: Vec<[usize; 3]> = Vec::with_capacity(t);
     let mut ci = 0;
-    let (mut g, mut edge_count, _e, _c) = components[ci];
+    let (mut g, _e) = components[ci];
     ci += 1;
 
     let mut vc = _e as usize;
@@ -170,12 +170,15 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
                 if let Some(_g) = stack.pop() {
                     g = _g;
                 } else if ci < components.len() {
-                    let (_g, _edge_count, _e, _c) = components[ci];
+                    debug!("new component!");
+                    let (_g, _e) = components[ci];
                     g = _g;
-                    ec = edge_count + _e as usize;
+                    ec += _e as usize;
                     vc += _e;
-                    edge_count = _edge_count;
                     ci += 1;
+                    debug!("g: {:?}", g);
+                    debug!("next: {:?}", next);
+                    debug!("end: {:?}", end);
                 }
             }
 
@@ -255,11 +258,13 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
                 g = stack.pop().expect("Invalid decompression stack");
             }
         }
-        debug!("after: {:?}", op);
-        debug!(
-            "last: {:?}",
-            tv.last().expect("test").map(|v| eb.previous[v - 1].id())
-        );
+        // debug!("after: {:?}", op);
+        // debug!(
+        //     "last: {:?}",
+        //     tv.last().expect("test").map(|v| eb.previous[v - 1].id())
+        // );
+        // debug!("next: {:?}", next);
+        // debug!("end: {:?}", end);
     }
 
     // '----------------------------------------
