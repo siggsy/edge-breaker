@@ -6,6 +6,7 @@ use super::EdgeBreaker;
 
 pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
     let t = eb.history.len();
+    let mut components = Vec::new();
     let mut d: i32 = 0; // |S| - |E|
     let mut c: usize = 0; // |C| = |V_i|
     let mut e: i32 = 0; // 3|E| + |L| + |R| - |C| - |S| = |V_e|
@@ -15,6 +16,11 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
     let mut edge_count = 0;
     let mut li = 0;
     let mut mi = 0;
+
+    // Create bounding loop
+    let mut end = vec![NULL; edge_count];
+    let mut next = vec![NULL; edge_count];
+    let mut prev = vec![NULL; edge_count];
 
     // .----------------------------------------
     // | Preprocessing phase
@@ -33,13 +39,37 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
                 e += 3;
                 edge_count += 3;
                 if d <= 0 {
-                    break;
+                    end.resize(edge_count, NULL);
+                    next.resize(edge_count, NULL);
+                    prev.resize(edge_count, NULL);
+                    let (_, _edge_count, _e, _c) = components.last().unwrap_or(&(NULL, 0, 0, 0));
+                    let vc = e as usize;
+
+                    for v in 0..vc {
+                        next[v + _edge_count] = Id::from_offset(((v + 1) % vc) + _edge_count);
+                        prev[v + _edge_count] = Id::from_offset(((v + vc - 1) % vc) + _edge_count);
+                        end[v + _edge_count] = Id::from_offset(v + _e + _c);
+                    }
+
+                    components.push((
+                        Id::new(1 + _edge_count),
+                        edge_count,
+                        e as usize,
+                        _e + c + _c,
+                    ));
+                    debug!("components: {:?}", components.last());
+                    debug!("next: {:?}", next);
+                    debug!("end: {:?}", end);
+                    e = 0;
+                    c = 0;
+                    d = 0;
+                } else {
+                    let (_e, _s) = stack.pop().expect("(e,s) stack prematurely empty!");
+                    offsets[_s] = (e - _e - 2)
+                        .try_into()
+                        .expect("Encountered negative S offset!");
+                    d -= 1;
                 }
-                let (_e, _s) = stack.pop().expect("(e,s) stack prematurely empty!");
-                offsets[_s] = (e - _e - 2)
-                    .try_into()
-                    .expect("Encountered negative S offset!");
-                d -= 1;
             }
 
             Op::C => {
@@ -64,14 +94,11 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
                 li += 1;
             }
             Op::M => {
-                let (p, o, l) = eb.m_table[mi];
+                let (p, _, l) = eb.m_table[mi];
                 mi += 1;
 
                 e -= 1;
                 edge_count += 1;
-                if d <= 0 {
-                    break;
-                }
                 let (_e, _s) = stack.remove(p);
 
                 offsets[_s] = (-e - l as i32 - 1)
@@ -84,33 +111,21 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
 
     // '----------------------------------------
 
-    // Sanity check
-    assert!(t == eb.history.len());
-
     // .----------------------------------------
     // | Generation phase
 
     let mut tv: Vec<[usize; 3]> = Vec::with_capacity(t);
-    let mut vc = e as usize;
-    let mut ec: usize = 0;
+    let mut ci = 0;
+    let (mut g, mut edge_count, _e, _c) = components[ci];
+    ci += 1;
+
+    let mut vc = _e as usize;
+    let mut ec: usize = _e as usize;
     s = 0;
     li = 0;
     mi = 0;
 
-    // Create bounding loop
-    let mut end = vec![NULL; edge_count];
-    let mut next = vec![NULL; edge_count];
-    let mut prev = vec![NULL; edge_count];
-
-    for v in 0..vc {
-        next[v] = Id::from_offset((v + 1) % vc);
-        prev[v] = Id::from_offset((v + vc - 1) % vc);
-        end[v] = Id::from_offset(ec);
-        ec += 1;
-    }
-
-    let mut g = Id::new(1);
-    let mut stack: Vec<Id> = vec![g];
+    let mut stack: Vec<Id> = vec![];
 
     for op in eb.history.iter() {
         match op {
@@ -152,7 +167,16 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
                 let gn = next[g];
                 tv.push([end[gp].id(), end[g].id(), end[gn].id()]);
 
-                g = stack.pop().expect("Hmmmmmmm :(");
+                if let Some(_g) = stack.pop() {
+                    g = _g;
+                } else if ci < components.len() {
+                    let (_g, _edge_count, _e, _c) = components[ci];
+                    g = _g;
+                    ec = edge_count + _e as usize;
+                    vc += _e;
+                    edge_count = _edge_count;
+                    ci += 1;
+                }
             }
 
             Op::S => {
@@ -210,8 +234,8 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
                 let (p, o, _) = eb.m_table[mi];
                 mi += 1;
 
-                let mut d = stack[p + 1];
-                for _ in 0..o {
+                let mut d = stack[p];
+                for _ in 0..o + 1 {
                     d = next[d];
                 }
                 let dn = next[d];
@@ -228,7 +252,7 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
                 next[d] = g;
                 prev[g] = d;
 
-                g = stack.pop().expect("uh oh..");
+                g = stack.pop().expect("Invalid decompression stack");
             }
         }
         debug!("after: {:?}", op);
@@ -240,7 +264,6 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
 
     // '----------------------------------------
 
-    debug!("tv: {:?}", &tv);
     for t in tv.iter_mut() {
         for v in t.iter_mut() {
             *v = eb.previous[*v - 1].id();
