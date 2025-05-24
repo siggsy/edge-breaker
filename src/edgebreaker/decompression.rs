@@ -101,7 +101,7 @@ pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
                 edge_count += 1;
                 let (_e, _s) = stack.remove(p);
 
-                offsets[_s] = (-e - l as i32 - 1)
+                offsets[_s] = (-_e - l as i32)
                     .try_into()
                     .expect("Encountered negative S offset!");
                 d -= 1;
