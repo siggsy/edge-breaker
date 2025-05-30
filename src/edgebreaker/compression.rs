@@ -62,6 +62,7 @@ impl HalfEdges {
                     let hN = n[h];
                     let hP = p[h];
 
+                    // non-manifold edge.
                     if gN == NULL || gP == NULL {
                         // non-manifold edge.
                         let edge = ((a.id()), b.id());
@@ -70,9 +71,9 @@ impl HalfEdges {
                             None => 0,
                         };
                         conflicts.insert(edge, conflict_count + 1);
-                    } else {
-                        // First collision: make half edges internal
-
+                    }
+                    // First collision: make half edges internal
+                    else {
                         // Connect border loops
                         n[hP] = gN;
                         p[gN] = hP;
@@ -155,6 +156,70 @@ enum Mark {
 // | Entry point                                                              |
 // '--------------------------------------------------------------------------'
 
+fn markEdges(
+    mark: Mark,
+    gate: Id,
+    he: &mut HalfEdges,
+    previous: &mut Vec<Id>,
+    vm: &mut Vec<Mark>,
+    hm: &mut Vec<Mark>,
+    duplicated: &mut Vec<Id>,
+) {
+    let mut g = gate;
+    loop {
+        let mut sv = he.s[g];
+        let mut ev = he.e[g];
+
+        // Fix conflicts
+        let edge = (sv.id(), ev.id());
+        if let Some(&c) = he.conflicts.get(&edge) {
+            if c != 0 {
+                // Assign new IDs
+                vm.push(vm[sv]);
+                vm.push(vm[ev]);
+
+                duplicated.push(sv);
+                sv = Id::new(he.vertex_count + duplicated.len());
+                duplicated.push(ev);
+                ev = Id::new(he.vertex_count + duplicated.len());
+
+                // Walk around vertices and assign new ones
+                he.s[g] = sv;
+                he.e[g] = ev;
+
+                let mut b = he.p[g];
+                while b != NULL {
+                    he.e[b] = sv;
+                    b = HalfEdges::n(b);
+                    he.s[b] = sv;
+                    b = he.o[b];
+                }
+
+                b = g;
+                while b != NULL {
+                    he.e[b] = ev;
+                    b = HalfEdges::n(b);
+                    he.s[b] = ev;
+                    b = he.o[b];
+                }
+
+                he.conflicts.insert(edge, c - 1);
+            }
+        }
+
+        // Mark as boundary
+        if mark == Mark::External1 {
+            previous.push(ev);
+        }
+        vm[ev] = mark;
+        hm[g] = mark;
+        g = he.n[g];
+        if g == NULL || g == gate {
+            break;
+        }
+    }
+}
+
 pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
     // TODO: handle detached components
     let mut history = Vec::new();
@@ -177,70 +242,6 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
     };
 
     debug!("gate: {}", he.print_edge(gate));
-
-    fn markEdges(
-        mark: Mark,
-        gate: Id,
-        he: &mut HalfEdges,
-        previous: &mut Vec<Id>,
-        vm: &mut Vec<Mark>,
-        hm: &mut Vec<Mark>,
-        duplicated: &mut Vec<Id>,
-    ) {
-        let mut g = gate;
-        loop {
-            let mut sv = he.s[g];
-            let mut ev = he.e[g];
-
-            // Fix conflicts
-            let edge = (sv.id(), ev.id());
-            if let Some(&c) = he.conflicts.get(&edge) {
-                if c != 0 {
-                    // Assign new IDs
-                    vm.push(vm[sv]);
-                    vm.push(vm[ev]);
-
-                    duplicated.push(sv);
-                    sv = Id::new(he.vertex_count + duplicated.len());
-                    duplicated.push(ev);
-                    ev = Id::new(he.vertex_count + duplicated.len());
-
-                    // Walk around vertices and assign new ones
-                    he.s[g] = sv;
-                    he.e[g] = ev;
-
-                    let mut b = he.p[g];
-                    while b != NULL {
-                        he.e[b] = sv;
-                        b = HalfEdges::n(b);
-                        he.s[b] = sv;
-                        b = he.o[b];
-                    }
-
-                    b = g;
-                    while b != NULL {
-                        he.e[b] = ev;
-                        b = HalfEdges::n(b);
-                        he.s[b] = ev;
-                        b = he.o[b];
-                    }
-
-                    he.conflicts.insert(edge, c - 1);
-                }
-            }
-
-            // Mark as boundary
-            if mark == Mark::External1 {
-                previous.push(ev);
-            }
-            vm[ev] = mark;
-            hm[g] = mark;
-            g = he.n[g];
-            if g == NULL || g == gate {
-                break;
-            }
-        }
-    }
 
     // Mark first boundary
     markEdges(
