@@ -1,4 +1,3 @@
-use colored::Colorize;
 use log::warn;
 use std::{
     fmt::Debug,
