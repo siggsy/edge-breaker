@@ -53,7 +53,7 @@ impl CLI {
 fn print_help() {
     eprintln!(
         "usage: {} <{}> [{}]",
-        args().nth(0).unwrap().yellow(),
+        args().nth(0).unwrap().split('/').last().unwrap().yellow(),
         "OPERATIONS".green(),
         "FLAGS".blue()
     );
