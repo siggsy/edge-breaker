@@ -2,7 +2,6 @@ use std::{
     env::{Args, args},
     fs::File,
     io::{self, BufRead, BufReader, LineWriter, Write},
-    os::fd::AsFd,
     process::exit,
 };
 
