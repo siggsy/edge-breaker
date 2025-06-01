@@ -6,6 +6,7 @@ use std::{
     process::exit,
 };
 
+use colored::Colorize;
 use debug::Logger;
 use log::{LevelFilter, error};
 use obj::Obj;
@@ -17,7 +18,6 @@ mod obj;
 static LOGGER: Logger = Logger;
 
 enum Operation {
-    Dry,
     Compress,
     Decompress,
 }
@@ -26,7 +26,7 @@ struct CLI {
     verbose: bool,
     input: Option<String>,
     output: Option<String>,
-    operation: Operation,
+    operation: Option<Operation>,
 }
 
 impl CLI {
@@ -51,12 +51,31 @@ impl CLI {
     }
 }
 
+fn print_help() {
+    eprintln!(
+        "usage: {} <{}> [{}]",
+        args().nth(0).unwrap().yellow(),
+        "OPERATIONS".green(),
+        "FLAGS".blue()
+    );
+    eprintln!();
+    eprintln!("{}:", "OPERATIONS".green());
+    eprintln!("  compress       Compress input and write it to output");
+    eprintln!("  decompress     Decompress input and write it to output");
+    eprintln!();
+    eprintln!("{}:", "FLAGS".blue());
+    eprintln!("  -i <file>      Input file. Defaults to stdin");
+    eprintln!("  -o <file>      Output file. Defaults to stdout");
+    eprintln!("  -v             Increase verbosity");
+    eprintln!();
+}
+
 fn parse_args(args: &mut Args) -> CLI {
     let mut cli = CLI {
         verbose: false,
         input: None,
         output: None,
-        operation: Operation::Dry,
+        operation: None,
     };
 
     while let Some(arg) = args.next() {
@@ -87,7 +106,7 @@ fn parse_args(args: &mut Args) -> CLI {
 
             Some('c') => {
                 if "compression".starts_with(&arg) {
-                    cli.operation = Operation::Compress
+                    cli.operation = Some(Operation::Compress)
                 } else {
                     error!("Unknown operation '{}'", arg);
                 }
@@ -95,7 +114,7 @@ fn parse_args(args: &mut Args) -> CLI {
 
             Some('d') => {
                 if "decompression".starts_with(&arg) {
-                    cli.operation = Operation::Decompress
+                    cli.operation = Some(Operation::Decompress)
                 } else {
                     error!("Unknown operation '{}'", arg);
                 }
@@ -120,17 +139,17 @@ fn main() -> std::io::Result<()> {
     });
 
     match cli.operation {
-        Operation::Compress => {
+        Some(Operation::Compress) => {
             let mut obj = Obj::read(&mut cli.open_input());
             edgebreaker::compress_obj(&mut obj);
             obj.write(&mut cli.open_output());
         }
-        Operation::Decompress => {
+        Some(Operation::Decompress) => {
             let mut obj = Obj::read(&mut cli.open_input());
             edgebreaker::decompress_obj(&mut obj);
             obj.write(&mut cli.open_output());
         }
-        _ => todo!("Implement"),
+        None => print_help(),
     };
 
     Ok(())
