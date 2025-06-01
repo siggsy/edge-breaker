@@ -1,7 +1,13 @@
-use std::{env::args, fs::File, io::BufReader};
+use std::{
+    env::{Args, args},
+    fs::File,
+    io::{self, BufRead, BufReader, LineWriter, Write},
+    os::fd::AsFd,
+    process::exit,
+};
 
 use debug::Logger;
-use log::LevelFilter;
+use log::{LevelFilter, error};
 use obj::Obj;
 
 mod debug;
@@ -9,18 +15,123 @@ mod edgebreaker;
 mod obj;
 
 static LOGGER: Logger = Logger;
-static LOG_LEVEL: LevelFilter = LevelFilter::Debug;
+
+enum Operation {
+    Dry,
+    Compress,
+    Decompress,
+}
+
+struct CLI {
+    verbose: bool,
+    input: Option<String>,
+    output: Option<String>,
+    operation: Operation,
+}
+
+impl CLI {
+    fn open_input(&self) -> Box<dyn BufRead> {
+        match &self.input {
+            Some(path) => Box::new(BufReader::new(File::open(path).unwrap_or_else(|_| {
+                error!("Input file does not exist");
+                exit(1);
+            }))),
+            None => Box::new(BufReader::new(io::stdin())),
+        }
+    }
+
+    fn open_output(&self) -> Box<dyn Write> {
+        match &self.output {
+            Some(path) => Box::new(LineWriter::new(File::create(path).unwrap_or_else(|_| {
+                error!("Output file does not exist");
+                exit(1);
+            }))),
+            None => Box::new(LineWriter::new(io::stdout())),
+        }
+    }
+}
+
+fn parse_args(args: &mut Args) -> CLI {
+    let mut cli = CLI {
+        verbose: false,
+        input: None,
+        output: None,
+        operation: Operation::Dry,
+    };
+
+    while let Some(arg) = args.next() {
+        let mut arg_chars = arg.chars();
+        match arg_chars.next() {
+            Some('-') => {
+                while let Some(ch) = arg_chars.next() {
+                    match ch {
+                        'v' => cli.verbose = true,
+                        'i' => {
+                            if let Some(path) = args.next() {
+                                cli.input = Some(path);
+                            } else {
+                                error!("-i: missing file path")
+                            }
+                        }
+                        'o' => {
+                            if let Some(path) = args.next() {
+                                cli.output = Some(path);
+                            } else {
+                                error!("-o: missing file path")
+                            }
+                        }
+                        _ => error!("Unknown flag '{}'", ch),
+                    }
+                }
+            }
+
+            Some('c') => {
+                if "compression".starts_with(&arg) {
+                    cli.operation = Operation::Compress
+                } else {
+                    error!("Unknown operation '{}'", arg);
+                }
+            }
+
+            Some('d') => {
+                if "decompression".starts_with(&arg) {
+                    cli.operation = Operation::Decompress
+                } else {
+                    error!("Unknown operation '{}'", arg);
+                }
+            }
+
+            _ => error!("Failed to parse argument '{}'", arg),
+        }
+    }
+
+    cli
+}
 
 fn main() -> std::io::Result<()> {
-    let fallback = String::from("./assets/cube.obj");
+    let cli = parse_args(&mut args());
 
-    let _ = log::set_logger(&LOGGER).map(|()| log::set_max_level(LOG_LEVEL));
-    let mut reader = BufReader::new(File::open(args().nth(1).unwrap_or(fallback))?);
-    let obj = Obj::read(&mut reader);
-    let eb = edgebreaker::compress_obj(&obj);
-    let _obj = edgebreaker::decompress_obj(&eb, obj.vertices);
-    let f = File::create("out/compress-decompress.obj")
-        .expect("Failed creating file compress-decompress.obj");
-    _obj.write(&f);
+    let _ = log::set_logger(&LOGGER).map(|()| {
+        log::set_max_level(if cli.verbose {
+            LevelFilter::Debug
+        } else {
+            LevelFilter::Info
+        })
+    });
+
+    match cli.operation {
+        Operation::Compress => {
+            let mut obj = Obj::read(&mut cli.open_input());
+            edgebreaker::compress_obj(&mut obj);
+            obj.write(&mut cli.open_output());
+        }
+        Operation::Decompress => {
+            let mut obj = Obj::read(&mut cli.open_input());
+            edgebreaker::decompress_obj(&mut obj);
+            obj.write(&mut cli.open_output());
+        }
+        _ => todo!("Implement"),
+    };
+
     Ok(())
 }

@@ -22,7 +22,7 @@ impl log::Log for Logger {
         }
         .bold();
 
-        println!(
+        eprintln!(
             "[{}:{}:{}] {}",
             level,
             record.file().unwrap(),

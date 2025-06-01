@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{edgebreaker::common::Op, obj::Obj};
+use crate::{edgebreaker::public::Op, obj::Obj};
 use log::debug;
 
 use super::{
@@ -221,7 +221,6 @@ fn markEdges(
 }
 
 pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
-    // TODO: handle detached components
     let mut history = Vec::new();
     let mut previous = Vec::new();
     let mut lengths = Vec::new();
@@ -236,7 +235,7 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
     debug!("conflicts: {:?}", he.conflicts);
 
     // Find the first gate
-    let mut gate = match he.n.iter().position(|&x| x != NULL) {
+    let gate = match he.n.iter().position(|&x| x != NULL) {
         Some(i) => Id::from_offset(i),
         None => Id::new(1),
     };
@@ -288,17 +287,10 @@ pub fn compress(he: &mut HalfEdges) -> EdgeBreaker {
     stack.push(gate);
     'main: loop {
         while let Some(g) = stack.pop() {
-            debug!("trace: {:?}", (he.s[g], he.e[g]));
             if let Mark::External3(_g) = hm[g] {
-                debug!("cleanup: {:?}", g);
                 // Mark with External1
                 let mut b = g;
                 loop {
-                    if hm[b] != Mark::External3(g) {
-                        debug!("mark: {:?}", hm[b]);
-                        debug!("b: {:?}", (he.s[b], he.e[b]));
-                        // panic!("oh oh");
-                    }
                     hm[b] = Mark::External1;
                     vm[he.e[b]] = Mark::External1;
                     b = he.n[b];

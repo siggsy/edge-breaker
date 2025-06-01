@@ -1,8 +1,8 @@
 use log::debug;
 
-use crate::edgebreaker::common::{Id, NULL, Op};
+use crate::edgebreaker::common::{Id, NULL};
 
-use super::EdgeBreaker;
+use super::{EdgeBreaker, public::Op};
 
 pub fn decompress(eb: &EdgeBreaker) -> Vec<[usize; 3]> {
     let t = eb.history.len();
